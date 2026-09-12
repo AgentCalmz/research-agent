@@ -6,6 +6,8 @@ export type Config = {
   maxAgentSteps: number;
   maxRequests: number;
   requestTimeoutMs: number;
+  brainMinIntervalMs: number;
+  brainMaxOutputTokens: number;
   dataDir: string;
 };
 
@@ -32,9 +34,13 @@ export function loadConfig(): Config {
     groqModel: process.env.GROQ_MODEL ?? 'openai/gpt-oss-120b',
     searchBackend,
     searxngUrl: process.env.SEARXNG_URL,
-    maxAgentSteps: intEnv('MAX_AGENT_STEPS', 20),
-    maxRequests: intEnv('MAX_REQUESTS', 60),
+    // Groq Free currently lists 30 RPM / 1K RPD / 8K TPM for GPT-OSS 120B.
+    // Keep the agent deliberately conservative so one research run does not burst the free quota.
+    maxAgentSteps: intEnv('MAX_AGENT_STEPS', 8),
+    maxRequests: intEnv('MAX_REQUESTS', 40),
     requestTimeoutMs: intEnv('REQUEST_TIMEOUT_MS', 15000),
+    brainMinIntervalMs: intEnv('BRAIN_MIN_INTERVAL_MS', 2500),
+    brainMaxOutputTokens: intEnv('BRAIN_MAX_OUTPUT_TOKENS', 1000),
     dataDir: process.env.DATA_DIR ?? './data'
   };
 }

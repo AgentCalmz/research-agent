@@ -42,7 +42,7 @@ export class GroqBrain implements BrainProvider {
     const response = await this.client.responses.create({
       model: this.model,
       max_output_tokens: this.maxOutputTokens,
-      reasoning_effort: 'low',
+      reasoning: { effort: 'low' },
       parallel_tool_calls: true,
       input: [
         { role: 'system', content: `${SYSTEM}\n\n${input.system}` },

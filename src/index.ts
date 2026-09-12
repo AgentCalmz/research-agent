@@ -29,7 +29,12 @@ try {
   registerDiscoveryTools(registry, search, new OpportunityStore(config.dataDir));
 
   const agent = new ResearchAgent(
-    new GroqBrain(config.groqApiKey, config.groqModel),
+    new GroqBrain(
+      config.groqApiKey,
+      config.groqModel,
+      config.brainMinIntervalMs,
+      config.brainMaxOutputTokens
+    ),
     registry,
     config.maxAgentSteps
   );

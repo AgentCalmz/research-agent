@@ -15,7 +15,9 @@ function source(url: string, sourceType: Source['sourceType']): Source {
 function extractLinks(base: string, html: string): string[] {
   const links: string[] = [];
   for (const match of html.matchAll(/<a[^>]+href=["']([^"']+)["']/gi)) {
-    const url = absoluteUrl(base, match[1]);
+    const href = match[1];
+    if (!href) continue;
+    const url = absoluteUrl(base, href);
     if (url) links.push(url);
   }
   return [...new Set(links)];
@@ -99,7 +101,8 @@ export function registerDiscoveryTools(
       const queued = new Set(queue);
       const pages: Array<{ url: string; status: number; text: string }> = [];
       while (queue.length && pages.length < maxPages) {
-        const current = queue.shift()!;
+        const current = queue.shift();
+        if (!current) break;
         if (!(await allowedByRobots(current))) continue;
         const response = await fetchText(current);
         const html = await response.text();
@@ -171,7 +174,8 @@ export function registerDiscoveryTools(
       required: ['domain']
     },
     execute: async (args) => {
-      const raw = String(args.domain).replace(/^https?:\/\//i, '').split('/')[0];
+      const raw = String(args.domain).replace(/^https?:\/\//i, '').split('/')[0]?.trim();
+      if (!raw) return { domain: '', resolves: false, error: 'Domain is empty' };
       try {
         const records = await lookup(raw, { all: true });
         return { domain: raw, resolves: true, addresses: records.map((r) => r.address) };

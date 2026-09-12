@@ -20,8 +20,8 @@ export class GroqBrain implements BrainProvider {
   constructor(
     apiKey: string,
     model = 'openai/gpt-oss-120b',
-    minIntervalMs = 2500,
-    maxOutputTokens = 1000
+    minIntervalMs = 3000,
+    maxOutputTokens = 900
   ) {
     if (!apiKey) throw new Error('GROQ_API_KEY is required');
     this.client = new OpenAI({ apiKey, baseURL: 'https://api.groq.com/openai/v1' });
@@ -42,6 +42,8 @@ export class GroqBrain implements BrainProvider {
     const response = await this.client.responses.create({
       model: this.model,
       max_output_tokens: this.maxOutputTokens,
+      reasoning_effort: 'low',
+      parallel_tool_calls: true,
       input: [
         { role: 'system', content: `${SYSTEM}\n\n${input.system}` },
         { role: 'user', content: input.user }

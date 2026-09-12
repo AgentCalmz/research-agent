@@ -5,38 +5,55 @@ export class ResearchAgent {
   constructor(
     private readonly brain: BrainProvider,
     private readonly tools: ToolRegistry,
-    private readonly maxSteps = 12
+    private readonly maxSteps = 20
   ) {}
 
   async run(userRequest: string): Promise<string> {
-    let context = userRequest;
-    let finalText = '';
+    if (!userRequest.trim()) throw new Error('Research request cannot be empty');
 
-    for (let step = 0; step < this.maxSteps; step++) {
+    let context = [
+      `Original research objective: ${userRequest}`,
+      'You are operating a local-first research runtime.',
+      'Use tools to discover and verify facts. When the objective asks for opportunities, return concrete entities, evidence, confidence, and source URLs.',
+      'Do not infer absence from a single failed request. Triangulate important claims.',
+      'When you have enough evidence, stop calling tools and provide the result.'
+    ].join('\n\n');
+
+    let finalText = '';
+    const trace: string[] = [];
+
+    for (let step = 1; step <= this.maxSteps; step++) {
       const response = await this.brain.complete({
-        system: `Execute the user's research objective. Use tools whenever factual discovery or verification is needed. Work iteratively. Do not invent results.\nAvailable execution environment: local PC.`,
+        system: `Research execution step ${step}/${this.maxSteps}. Keep work bounded and evidence-driven. Available environment: local PC.`,
         user: context,
         tools: this.tools.definitions()
       });
 
       finalText = response.text || finalText;
-      if (response.toolCalls.length === 0) return finalText;
+      trace.push(`step=${step} toolCalls=${response.toolCalls.length} finish=${response.finishReason ?? 'unknown'}`);
 
-      const results = [];
-      for (const call of response.toolCalls) {
-        const result = await this.tools.execute(call.name, call.arguments, call.id);
-        results.push(result);
+      if (response.toolCalls.length === 0) {
+        return finalText || 'The research brain returned no final answer.';
       }
 
+      const results = await Promise.all(
+        response.toolCalls.map((call) => this.tools.execute(call.name, call.arguments, call.id))
+      );
+
       context = [
-        `Original request: ${userRequest}`,
-        `Previous brain response: ${response.text}`,
-        'Tool results:',
+        `Original research objective: ${userRequest}`,
+        `Execution trace: ${trace.join('; ')}`,
+        `Brain note from previous step: ${response.text || '(none)'}`,
+        'Authoritative tool results from the local runtime:',
         JSON.stringify(results, null, 2),
-        'Continue the investigation. Verify uncertain claims and only finish when you have an actionable answer with source links.'
+        'Continue the investigation. Cross-check uncertain claims, prioritize independent sources, and only finish when the answer is actionable and source-linked.'
       ].join('\n\n');
     }
 
-    return finalText || 'Research stopped after reaching the execution step limit.';
+    return [
+      finalText || 'Research stopped after reaching the execution step limit.',
+      '',
+      `Execution trace: ${trace.join('; ')}`
+    ].join('\n');
   }
 }

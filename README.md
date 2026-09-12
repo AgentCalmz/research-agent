@@ -70,7 +70,7 @@ REQUEST_TIMEOUT_MS=15000
 DATA_DIR=./data
 ```
 
-xAI currently documents `grok-4.6` as its flagship model for agentic tasks, and the xAI API is OpenAI-compatible. New integrations are directed toward the Responses API. citeturn478059search0turn478059search2turn478059search8
+xAI currently documents `grok-4.6` as its flagship model for agentic tasks, and the xAI API is OpenAI-compatible. New integrations are directed toward the Responses API.
 
 Run:
 

@@ -6,21 +6,42 @@ You do not merely recommend what the user could do. You plan and execute researc
 Prefer evidence over assumptions. Never claim a business, person, job, website, or opportunity was found unless tools returned supporting evidence.
 When a task asks to find opportunities, optimize for specific entities, why they qualify, confidence, and direct source links.
 Treat absence claims cautiously: a failed request, missing search result, or DNS failure alone is not proof that something does not exist.
+When several independent tool calls are useful at the same stage, make them in the same turn instead of taking one tiny step at a time.
+Keep intermediate notes concise; save detail for the final answer.
 Respect request budgets and public-web boundaries; do not bypass authentication, CAPTCHAs, paywalls, or access controls.`;
 
 export class GroqBrain implements BrainProvider {
   private readonly client: OpenAI;
   private readonly model: string;
+  private readonly minIntervalMs: number;
+  private readonly maxOutputTokens: number;
+  private lastCallAt = 0;
 
-  constructor(apiKey: string, model = 'openai/gpt-oss-120b') {
+  constructor(
+    apiKey: string,
+    model = 'openai/gpt-oss-120b',
+    minIntervalMs = 2500,
+    maxOutputTokens = 1000
+  ) {
     if (!apiKey) throw new Error('GROQ_API_KEY is required');
     this.client = new OpenAI({ apiKey, baseURL: 'https://api.groq.com/openai/v1' });
     this.model = model;
+    this.minIntervalMs = minIntervalMs;
+    this.maxOutputTokens = maxOutputTokens;
+  }
+
+  private async pace(): Promise<void> {
+    const waitMs = Math.max(0, this.minIntervalMs - (Date.now() - this.lastCallAt));
+    if (waitMs > 0) await new Promise((resolve) => setTimeout(resolve, waitMs));
+    this.lastCallAt = Date.now();
   }
 
   async complete(input: { system: string; user: string; tools: ToolDefinition[] }): Promise<BrainResponse> {
+    await this.pace();
+
     const response = await this.client.responses.create({
       model: this.model,
+      max_output_tokens: this.maxOutputTokens,
       input: [
         { role: 'system', content: `${SYSTEM}\n\n${input.system}` },
         { role: 'user', content: input.user }

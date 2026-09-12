@@ -30,7 +30,10 @@ export async function allowedByRobots(targetUrl: string, userAgent = 'Opportunis
 }
 
 function parseRules(text: string, userAgent: string): string[] {
-  const lines = text.split(/\r?\n/).map((line) => line.split('#')[0].trim()).filter(Boolean);
+  const lines = text
+    .split(/\r?\n/)
+    .map((line) => (line.split('#')[0] ?? '').trim())
+    .filter(Boolean);
   const groups: Array<{ agents: string[]; disallow: string[] }> = [];
   let current: { agents: string[]; disallow: string[] } | null = null;
   let hasDirective = false;

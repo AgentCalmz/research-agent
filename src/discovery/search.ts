@@ -24,14 +24,17 @@ function decode(value: string): string {
 export class DuckDuckGoSearch implements SearchProvider {
   async search(query: string, limit = 10): Promise<SearchResult[]> {
     const url = `https://html.duckduckgo.com/html/?q=${encodeURIComponent(query)}`;
-    const response = await fetchText(url, { headers: { 'user-agent': 'opportunist-research-agent/0.1' } });
+    const response = await fetchText(url, { headers: { 'user-agent': 'opportunist-research-agent/0.2' } });
     if (!response.ok) throw new Error(`DuckDuckGo search failed with HTTP ${response.status}`);
     const html = await response.text();
     const results: SearchResult[] = [];
     const linkRe = /<a[^>]*class=["'][^"']*result__a[^"']*["'][^>]*href=["']([^"']+)["'][^>]*>([\s\S]*?)<\/a>/gi;
 
     for (const match of html.matchAll(linkRe)) {
-      let href = decode(match[1]);
+      const rawHref = match[1];
+      const rawTitle = match[2];
+      if (!rawHref || !rawTitle) continue;
+      let href = decode(rawHref);
       try {
         const parsed = new URL(href, 'https://duckduckgo.com');
         const redirected = parsed.searchParams.get('uddg');
@@ -39,8 +42,7 @@ export class DuckDuckGoSearch implements SearchProvider {
       } catch { /* keep original href */ }
       try {
         const absolute = new URL(href, 'https://duckduckgo.com').toString();
-        const title = cleanHtml(match[2], 300);
-        results.push({ title, url: absolute, source: 'duckduckgo' });
+        results.push({ title: cleanHtml(rawTitle, 300), url: absolute, source: 'duckduckgo' });
       } catch { /* ignore malformed result links */ }
       if (results.length >= limit) break;
     }
@@ -57,7 +59,7 @@ export class SearxngSearch implements SearchProvider {
     url.searchParams.set('q', query);
     url.searchParams.set('format', 'json');
     url.searchParams.set('language', 'en');
-    const response = await fetchText(url.toString(), { headers: { 'user-agent': 'opportunist-research-agent/0.1' } });
+    const response = await fetchText(url.toString(), { headers: { 'user-agent': 'opportunist-research-agent/0.2' } });
     if (!response.ok) throw new Error(`SearXNG search failed with HTTP ${response.status}`);
     const json = await response.json() as { results?: Array<{ title?: string; url?: string; content?: string }> };
     return (json.results ?? []).slice(0, limit).flatMap((item) => item.url && item.title ? [{

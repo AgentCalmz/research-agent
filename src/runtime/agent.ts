@@ -1,18 +1,41 @@
-import type { BrainProvider } from '../core/types.js';
+import type { BrainProvider, BrainResponse, ToolResult } from '../core/types.js';
 import { ToolRegistry } from './tools.js';
 
-const MAX_RESULT_CHARS = 5000;
+const MAX_RESULT_CHARS = 1400;
+const MAX_CONTEXT_CHARS = 8500;
 
-function compactResults(results: unknown): string {
-  const raw = JSON.stringify(results, null, 2);
-  return raw.length <= MAX_RESULT_CHARS ? raw : `${raw.slice(0, MAX_RESULT_CHARS)}\n...[tool results truncated to protect context/rate limits]`;
+function compactValue(value: unknown, depth = 0): unknown {
+  if (depth > 4) return '[truncated]';
+  if (typeof value === 'string') return value.length > 700 ? `${value.slice(0, 700)}…` : value;
+  if (Array.isArray(value)) return value.slice(0, 12).map((item) => compactValue(item, depth + 1));
+  if (value && typeof value === 'object') {
+    const entries = Object.entries(value as Record<string, unknown>);
+    entries.sort(([a], [b]) => {
+      const important = (key: string) => /url|title|name|status|score|confidence|phone|email|domain|claim|snippet|description/i.test(key) ? 0 : 1;
+      return important(a) - important(b);
+    });
+    return Object.fromEntries(entries.slice(0, 20).map(([key, item]) => [key, compactValue(item, depth + 1)]));
+  }
+  return value;
+}
+
+function compactResults(results: ToolResult[]): string {
+  return results.map((result) => {
+    const payload = JSON.stringify({
+      tool: result.name,
+      toolCallId: result.toolCallId,
+      error: result.error,
+      output: compactValue(result.output)
+    });
+    return payload.length > MAX_RESULT_CHARS ? `${payload.slice(0, MAX_RESULT_CHARS)}…` : payload;
+  }).join('\n').slice(0, MAX_CONTEXT_CHARS);
 }
 
 export class ResearchAgent {
   constructor(
     private readonly brain: BrainProvider,
     private readonly tools: ToolRegistry,
-    private readonly maxSteps = 8
+    private readonly maxSteps = 4
   ) {}
 
   async run(userRequest: string): Promise<string> {
@@ -20,19 +43,26 @@ export class ResearchAgent {
 
     let context = [
       `Original research objective: ${userRequest}`,
-      'You are operating a local-first research runtime.',
-      'Use tools to discover and verify facts. When the objective asks for opportunities, return concrete entities, evidence, confidence, and source URLs.',
-      'Do not infer absence from a single failed request. Triangulate important claims.',
-      'Batch independent tool calls when possible. Avoid repeatedly searching the same query.',
-      'When you have enough evidence, stop calling tools and provide the result.'
+      'Use local tools for web discovery and verification. The model is a decision layer, not a transport for raw web pages.',
+      'Batch independent tool calls in one response whenever possible.',
+      'For absence claims, require multiple independent observations.',
+      'Return concrete entities, evidence URLs, public contacts, confidence, and opportunity scores when requested.',
+      'Do not finish until the available evidence is sufficient or genuinely exhausted.'
     ].join('\n\n');
 
     let finalText = '';
     const trace: string[] = [];
 
     for (let step = 1; step <= this.maxSteps; step++) {
-      const response = await this.brain.complete({
-        system: `Research execution step ${step}/${this.maxSteps}. Keep work bounded and evidence-driven. Available environment: local PC.`,
+      const response: BrainResponse = await this.brain.complete({
+        system: [
+          `Research phase ${step}/${this.maxSteps}.`,
+          'Minimize LLM calls. Prefer several independent tool calls in the same response instead of one-call-at-a-time investigation.',
+          'Only compact evidence summaries are returned between phases; use their URLs and key facts.',
+          step === this.maxSteps
+            ? 'This is the final phase. Synthesize an evidence-backed answer and avoid further tool calls.'
+            : 'Continue investigating with batched tools unless enough verified evidence exists.'
+        ].join(' '),
         user: context,
         tools: this.tools.definitions()
       });
@@ -40,9 +70,7 @@ export class ResearchAgent {
       finalText = response.text || finalText;
       trace.push(`step=${step} toolCalls=${response.toolCalls.length} finish=${response.finishReason ?? 'unknown'}`);
 
-      if (response.toolCalls.length === 0) {
-        return finalText || 'The research brain returned no final answer.';
-      }
+      if (response.toolCalls.length === 0) return finalText || 'The research brain returned no final answer.';
 
       const results = await Promise.all(
         response.toolCalls.map((call) => this.tools.execute(call.name, call.arguments, call.id))
@@ -51,17 +79,15 @@ export class ResearchAgent {
       context = [
         `Original research objective: ${userRequest}`,
         `Execution trace: ${trace.join('; ')}`,
-        `Brain note from previous step: ${response.text || '(none)'}`,
-        'Authoritative tool results from the local runtime:',
+        `Previous model note: ${(response.text || '(none)').slice(0, 700)}`,
+        'Compact authoritative tool results from the local runtime:',
         compactResults(results),
-        'Continue the investigation. Cross-check uncertain claims, prioritize independent sources, avoid duplicate searches, and only finish when the answer is actionable and source-linked.'
-      ].join('\n\n');
+        step === this.maxSteps - 1
+          ? 'Prepare the final evidence-backed answer from the compact results. Do not request raw pages.'
+          : 'Choose the next batched verification actions. Avoid duplicate searches and do not repeat raw content already seen.'
+      ].join('\n\n').slice(0, MAX_CONTEXT_CHARS);
     }
 
-    return [
-      finalText || 'Research stopped after reaching the execution step limit.',
-      '',
-      `Execution trace: ${trace.join('; ')}`
-    ].join('\n');
+    return [finalText || 'Research stopped after reaching the execution step limit.', '', `Execution trace: ${trace.join('; ')}`].join('\n');
   }
 }

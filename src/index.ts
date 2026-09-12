@@ -1,6 +1,6 @@
 import 'dotenv/config';
 import { loadConfig } from './core/config.js';
-import { XaiBrain } from './brain/xai.js';
+import { GroqBrain } from './brain/groq.js';
 import { DuckDuckGoSearch, SearxngSearch } from './discovery/search.js';
 import { ResearchAgent } from './runtime/agent.js';
 import { registerBuiltinTools } from './runtime/builtin-tools.js';
@@ -29,7 +29,7 @@ try {
   registerDiscoveryTools(registry, search, new OpportunityStore(config.dataDir));
 
   const agent = new ResearchAgent(
-    new XaiBrain(config.xaiApiKey, config.xaiModel),
+    new GroqBrain(config.groqApiKey, config.groqModel),
     registry,
     config.maxAgentSteps
   );

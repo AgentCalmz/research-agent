@@ -3,16 +3,13 @@ import { lookup } from 'node:dns/promises';
 import type { Evidence, Source } from '../core/types.js';
 import { classifyWebsiteStatus, makeOpportunity, type OpportunitySignals } from '../opportunity/scoring.js';
 import { absoluteUrl, cleanHtml, fetchText } from './http.js';
+import { allowedByRobots } from './robots.js';
 import { OpportunityStore } from './store.js';
 import type { ToolRegistry } from './tools.js';
 import type { SearchProvider, SearchResult } from '../discovery/search.js';
 
 function source(url: string, sourceType: Source['sourceType']): Source {
   return { url, sourceType, retrievedAt: new Date().toISOString() };
-}
-
-function pickUrls(results: SearchResult[]): string[] {
-  return [...new Set(results.map((r) => r.url))];
 }
 
 function extractLinks(base: string, html: string): string[] {
@@ -64,7 +61,7 @@ export function registerDiscoveryTools(
     execute: async (args) => {
       const location = String(args.location);
       const category = String(args.category ?? 'businesses');
-      const limit = Math.min(50, Number(args.limit ?? 20));
+      const limit = Math.min(50, Math.max(1, Number(args.limit ?? 20)));
       const queries = [
         `${category} in ${location}`,
         `${category} ${location} contact phone`,
@@ -83,7 +80,7 @@ export function registerDiscoveryTools(
 
   registry.register({
     name: 'crawl_site',
-    description: 'Fetch a public page and inspect its same-site links. Bounded to a small number of pages; does not bypass robots.txt, authentication, or CAPTCHAs.',
+    description: 'Fetch a public site and inspect same-origin links within a strict page limit while respecting robots.txt. Never bypass authentication or CAPTCHAs.',
     parameters: {
       type: 'object',
       properties: {
@@ -95,22 +92,24 @@ export function registerDiscoveryTools(
     },
     execute: async (args) => {
       const start = String(args.url);
-      const maxPages = Math.min(8, Number(args.max_pages ?? 4));
-      const maxChars = Math.min(20000, Number(args.max_chars ?? 8000));
+      const maxPages = Math.min(8, Math.max(1, Number(args.max_pages ?? 4)));
+      const maxChars = Math.min(20000, Math.max(1000, Number(args.max_chars ?? 8000)));
       const origin = new URL(start).origin;
       const queue = [start];
-      const visited = new Set<string>();
+      const queued = new Set(queue);
       const pages: Array<{ url: string; status: number; text: string }> = [];
       while (queue.length && pages.length < maxPages) {
         const current = queue.shift()!;
-        if (visited.has(current)) continue;
-        visited.add(current);
+        if (!(await allowedByRobots(current))) continue;
         const response = await fetchText(current);
         const html = await response.text();
         pages.push({ url: response.url, status: response.status, text: cleanHtml(html, maxChars) });
         for (const link of extractLinks(response.url, html)) {
           try {
-            if (new URL(link).origin === origin && !visited.has(link)) queue.push(link);
+            if (new URL(link).origin === origin && !queued.has(link)) {
+              queued.add(link);
+              queue.push(link);
+            }
           } catch { /* ignore malformed links */ }
         }
       }
@@ -136,7 +135,7 @@ export function registerDiscoveryTools(
 
   registry.register({
     name: 'find_social_profiles',
-    description: 'Search for likely public social profiles for a business. Returns source URLs and never treats a social profile as an independent website.',
+    description: 'Search for likely public social profiles for a business. A social profile is never treated as an independent website.',
     parameters: {
       type: 'object',
       properties: {
@@ -149,7 +148,7 @@ export function registerDiscoveryTools(
     execute: async (args) => {
       const name = String(args.business_name);
       const location = String(args.location);
-      const limit = Number(args.limit ?? 8);
+      const limit = Math.min(10, Math.max(1, Number(args.limit ?? 8)));
       const queries = [
         `"${name}" ${location} site:instagram.com`,
         `"${name}" ${location} site:facebook.com`,
@@ -184,7 +183,7 @@ export function registerDiscoveryTools(
 
   registry.register({
     name: 'assess_website_presence',
-    description: 'Classify website presence from candidate URLs, reachable URLs, and social-only evidence. Use this after search and website checks; do not call a failed HTTP request proof of absence.',
+    description: 'Classify website presence from candidate URLs, reachable URLs, and social evidence. Never treat a failed request alone as proof of absence.',
     parameters: {
       type: 'object',
       properties: {
@@ -239,7 +238,7 @@ export function registerDiscoveryTools(
 
   registry.register({
     name: 'save_opportunity',
-    description: 'Persist a verified or clearly qualified opportunity locally with provenance. Save only concrete findings and source URLs.',
+    description: 'Persist a concrete opportunity locally with provenance. Save findings supported by returned source URLs.',
     parameters: {
       type: 'object',
       properties: {
@@ -273,7 +272,7 @@ export function registerDiscoveryTools(
     name: 'list_opportunities',
     description: 'List locally saved opportunities from previous hunts.',
     parameters: { type: 'object', properties: { limit: { type: 'integer', minimum: 1, maximum: 100, default: 25 } } },
-    execute: async (args) => store.list(Number(args.limit ?? 25))
+    execute: async (args) => store.list(Math.min(100, Math.max(1, Number(args.limit ?? 25))))
   });
 
   return registry;

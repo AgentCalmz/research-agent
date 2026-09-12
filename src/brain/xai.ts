@@ -19,42 +19,40 @@ export class XaiBrain implements BrainProvider {
   }
 
   async complete(input: { system: string; user: string; tools: ToolDefinition[] }): Promise<BrainResponse> {
-    const response = await this.client.chat.completions.create({
+    const response = await this.client.responses.create({
       model: this.model,
-      messages: [
+      input: [
         { role: 'system', content: `${SYSTEM}\n\n${input.system}` },
         { role: 'user', content: input.user }
       ],
       tools: input.tools.map((tool) => ({
         type: 'function' as const,
-        function: {
-          name: tool.name,
-          description: tool.description,
-          parameters: tool.parameters
-        }
+        name: tool.name,
+        description: tool.description,
+        parameters: tool.parameters,
+        strict: false
       })),
       tool_choice: 'auto'
     });
 
-    const choice = response.choices[0];
-    const message = choice?.message;
     const toolCalls: ToolCall[] = [];
-    for (const call of message?.tool_calls ?? []) {
+    for (const item of response.output ?? []) {
+      if (!item || item.type !== 'function_call') continue;
       try {
         toolCalls.push({
-          id: call.id,
-          name: call.function.name,
-          arguments: JSON.parse(call.function.arguments || '{}') as Record<string, unknown>
+          id: item.call_id,
+          name: item.name,
+          arguments: JSON.parse(item.arguments || '{}') as Record<string, unknown>
         });
       } catch {
-        toolCalls.push({ id: call.id, name: call.function.name, arguments: {} });
+        toolCalls.push({ id: item.call_id, name: item.name, arguments: {} });
       }
     }
 
     return {
-      text: message?.content ?? '',
+      text: response.output_text ?? '',
       toolCalls,
-      finishReason: choice?.finish_reason
+      finishReason: toolCalls.length > 0 ? 'tool_calls' : 'completed'
     };
   }
 }

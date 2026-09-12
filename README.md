@@ -1,14 +1,19 @@
 # Opportunist Research Agent
 
-A local-first research and opportunity-discovery agent: **Grok is the brain; your PC is the body.**
+A local-first research and opportunity-discovery agent: **the model is the brain; your PC is the body.**
 
 The runtime is designed to hunt for concrete opportunities rather than merely explain how a user could find them.
 
+## Current brain
+
+The default brain is **Groq + `openai/gpt-oss-120b`**. Groq exposes an OpenAI-compatible API, and its current GPT-OSS 120B model supports tool use, browser search, code execution, structured outputs, reasoning, and a 131K context window. The code keeps the model configurable so other compatible providers/models can be added without changing the research runtime.
+
 ## What is implemented
 
-- **Grok/xAI brain** using the xAI OpenAI-compatible Responses API.
+- **Provider-isolated brain** with Groq as the first provider.
+- **GPT-OSS 120B** as the default agentic model.
 - **Tool-driven research loop** with bounded steps and parallel independent tool calls.
-- **Free/configurable web discovery** using DuckDuckGo HTML search by default, or a self-hosted/selected SearXNG endpoint.
+- **Free/configurable web discovery** using DuckDuckGo HTML search by default, or a SearXNG endpoint.
 - **Business discovery** across multiple public-web query patterns.
 - **Evidence gathering** from public pages, contacts, domains, and social profiles.
 - **Website classification** that treats absence cautiously instead of equating one HTTP failure with “no website.”
@@ -53,16 +58,16 @@ Requirements: Node.js 20+.
 
 ```bash
 npm install
-copy .env.example .env
+cp .env.example .env
 ```
 
-On PowerShell, `copy` works as the alias for `Copy-Item`; on macOS/Linux use `cp .env.example .env`.
+On Windows Git Bash, `cp` works; PowerShell users can use `Copy-Item .env.example .env`.
 
-Put your xAI API key in `.env`:
+Put your Groq API key in `.env`:
 
 ```env
-XAI_API_KEY=your_key_here
-XAI_MODEL=grok-4.6
+GROQ_API_KEY=your_key_here
+GROQ_MODEL=openai/gpt-oss-120b
 SEARCH_BACKEND=duckduckgo
 MAX_AGENT_STEPS=20
 MAX_REQUESTS=60
@@ -70,14 +75,12 @@ REQUEST_TIMEOUT_MS=15000
 DATA_DIR=./data
 ```
 
-xAI currently documents `grok-4.6` as its flagship model for agentic tasks, and the xAI API is OpenAI-compatible. New integrations are directed toward the Responses API.
-
 Run:
 
 ```bash
 npm run build
 npm test
-npm start -- "Find 20 Abuja businesses that appear to have no independent website. Verify each lead and return source links."
+npm start -- "Find 5 Abuja businesses that appear to have no independent website. Verify each lead and return source links."
 ```
 
 Development mode:
@@ -88,7 +91,7 @@ npm run dev -- "Find 10 salons in Abuja with active social profiles but no indep
 
 ## Search backends
 
-The default backend is DuckDuckGo HTML because it requires no separate search API key. For stronger control, run or use a SearXNG instance:
+The default backend is DuckDuckGo HTML because it requires no separate search API key. For stronger control, configure SearXNG:
 
 ```env
 SEARCH_BACKEND=searxng
@@ -100,33 +103,33 @@ Search availability, ranking, and rate limits vary by backend. The agent treats 
 ## Architecture
 
 ```text
-                  GROK / xAI
-                 ┌───────────┐
-                 │   BRAIN   │
-                 │ planning  │
-                 │ reasoning │
-                 │ decisions │
-                 └─────┬─────┘
-                       │ tool calls
-                       ▼
-              LOCAL RESEARCH RUNTIME
-        ┌──────────────┼────────────────┐
-        ▼              ▼                ▼
-     Discovery      Evidence         Memory
-     ├ search       ├ fetch           └ opportunities.jsonl
-     ├ businesses   ├ contacts
-     └ socials      ├ domain checks
-                    └ website status
-                       │
-                       ▼
-                Opportunity Engine
-                ├ score
-                ├ rank
-                └ explain with sources
+                  CONFIGURED BRAIN
+                 ┌───────────────┐
+                 │ Groq / GPT-OSS│
+                 │ reasoning     │
+                 │ planning      │
+                 │ tool calls    │
+                 └───────┬───────┘
+                         │
+                         ▼
+                LOCAL RESEARCH BODY
+        ┌────────────────┼────────────────┐
+        ▼                ▼                ▼
+     Discovery        Evidence         Memory
+     ├ search         ├ fetch           └ opportunities.jsonl
+     ├ businesses     ├ contacts
+     └ socials        ├ domain checks
+                      └ website status
+                         │
+                         ▼
+                  Opportunity Engine
+                  ├ score
+                  ├ rank
+                  └ explain with sources
 ```
 
 ## Important boundaries
 
-This project is intentionally local-first and evidence-driven. It works with public information and does not bypass authentication, paywalls, CAPTCHAs, or access controls. Crawling is bounded and respects fetched robots rules.
+This project is local-first and evidence-driven. It works with public information and does not bypass authentication, paywalls, CAPTCHAs, or access controls. Crawling is bounded and respects fetched robots rules.
 
-For production-grade research, the next upgrades are richer entity resolution, source-specific parsers, browser automation for JavaScript-heavy sites, structured claim graphs, multi-provider brain adapters, exports, scheduled hunts, and a desktop UI. The current architecture is deliberately prepared for those additions without replacing the local execution model.
+The brain is deliberately replaceable. The next provider can implement the same `BrainProvider` interface without changing discovery, evidence, scoring, storage, or the CLI.

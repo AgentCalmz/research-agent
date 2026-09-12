@@ -1,3 +1,4 @@
+import 'dotenv/config';
 import { loadConfig } from './core/config.js';
 import { XaiBrain } from './brain/xai.js';
 import { DuckDuckGoSearch, SearxngSearch } from './discovery/search.js';

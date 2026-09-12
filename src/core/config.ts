@@ -1,6 +1,6 @@
 export type Config = {
-  xaiApiKey: string;
-  xaiModel: string;
+  groqApiKey: string;
+  groqModel: string;
   searchBackend: 'duckduckgo' | 'searxng';
   searxngUrl?: string;
   maxAgentSteps: number;
@@ -15,8 +15,8 @@ function intEnv(name: string, fallback: number): number {
 }
 
 export function loadConfig(): Config {
-  const xaiApiKey = process.env.XAI_API_KEY;
-  if (!xaiApiKey) throw new Error('XAI_API_KEY is required. Copy .env.example to .env and add your xAI API key.');
+  const groqApiKey = process.env.GROQ_API_KEY;
+  if (!groqApiKey) throw new Error('GROQ_API_KEY is required. Copy .env.example to .env and add your Groq API key.');
 
   const searchBackend = (process.env.SEARCH_BACKEND ?? 'duckduckgo').toLowerCase();
   if (searchBackend !== 'duckduckgo' && searchBackend !== 'searxng') {
@@ -28,8 +28,8 @@ export function loadConfig(): Config {
   }
 
   return {
-    xaiApiKey,
-    xaiModel: process.env.XAI_MODEL ?? 'grok-4.6',
+    groqApiKey,
+    groqModel: process.env.GROQ_MODEL ?? 'openai/gpt-oss-120b',
     searchBackend,
     searxngUrl: process.env.SEARXNG_URL,
     maxAgentSteps: intEnv('MAX_AGENT_STEPS', 20),

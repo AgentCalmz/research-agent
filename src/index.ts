@@ -1,6 +1,6 @@
 import 'dotenv/config';
 import { loadConfig } from './core/config.js';
-import { GroqBrain } from './brain/groq.js';
+import { OpenRouterBrain } from './brain/openrouter.js';
 import { DuckDuckGoSearch, SearxngSearch } from './discovery/search.js';
 import { ResearchAgent } from './runtime/agent.js';
 import { registerBuiltinTools } from './runtime/builtin-tools.js';
@@ -29,9 +29,10 @@ try {
   registerDiscoveryTools(registry, search, new OpportunityStore(config.dataDir));
 
   const agent = new ResearchAgent(
-    new GroqBrain(
-      config.groqApiKey,
-      config.groqModel,
+    new OpenRouterBrain(
+      config.openRouterApiKey,
+      config.openRouterModel,
+      config.openRouterFallbackModels,
       config.brainMinIntervalMs,
       config.brainMaxOutputTokens
     ),

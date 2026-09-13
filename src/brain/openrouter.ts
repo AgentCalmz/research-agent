@@ -10,6 +10,10 @@ When several independent tool calls are useful at the same stage, request them t
 Keep intermediate reasoning concise and make the smallest number of model calls needed.
 Respect public-web boundaries; do not bypass authentication, CAPTCHAs, paywalls, or access controls.`;
 
+type OpenRouterRequest = OpenAI.Chat.Completions.ChatCompletionCreateParamsNonStreaming & {
+  models?: string[];
+};
+
 export class OpenRouterBrain implements BrainProvider {
   private readonly client: OpenAI;
   private readonly model: string;
@@ -49,7 +53,7 @@ export class OpenRouterBrain implements BrainProvider {
   async complete(input: { system: string; user: string; tools: ToolDefinition[] }): Promise<BrainResponse> {
     await this.pace();
 
-    const body: Record<string, unknown> = {
+    const body: OpenRouterRequest = {
       model: this.model,
       max_tokens: this.maxOutputTokens,
       messages: [
@@ -67,11 +71,9 @@ export class OpenRouterBrain implements BrainProvider {
       tool_choice: 'auto'
     };
 
-    if (this.fallbackModels.length > 0) {
-      body.models = this.fallbackModels;
-    }
+    if (this.fallbackModels.length > 0) body.models = this.fallbackModels;
 
-    const response = await this.client.chat.completions.create(body as Parameters<OpenAI['chat']['completions']['create']>[0]);
+    const response = await this.client.chat.completions.create(body);
     const message = response.choices[0]?.message;
     const toolCalls: ToolCall[] = [];
 

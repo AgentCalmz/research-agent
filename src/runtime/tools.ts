@@ -13,8 +13,11 @@ export class ToolRegistry {
     return this;
   }
 
-  definitions(): ToolDefinition[] {
-    return [...this.tools.values()].map(({ execute: _execute, ...definition }) => definition);
+  definitions(names?: string[]): ToolDefinition[] {
+    const selected = names ? new Set(names) : undefined;
+    return [...this.tools.values()]
+      .filter((tool) => !selected || selected.has(tool.name))
+      .map(({ execute: _execute, ...definition }) => definition);
   }
 
   async execute(name: string, args: Record<string, unknown>, toolCallId: string): Promise<ToolResult> {

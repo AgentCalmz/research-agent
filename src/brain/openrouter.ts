@@ -49,26 +49,29 @@ export class OpenRouterBrain implements BrainProvider {
   async complete(input: { system: string; user: string; tools: ToolDefinition[] }): Promise<BrainResponse> {
     await this.pace();
 
-    const body = {
+    const body: Record<string, unknown> = {
       model: this.model,
-      ...(this.fallbackModels.length > 0 ? { models: this.fallbackModels } : {}),
       max_tokens: this.maxOutputTokens,
       messages: [
-        { role: 'system' as const, content: `${SYSTEM}\n\n${input.system}` },
-        { role: 'user' as const, content: input.user }
+        { role: 'system', content: `${SYSTEM}\n\n${input.system}` },
+        { role: 'user', content: input.user }
       ],
       tools: input.tools.map((tool) => ({
-        type: 'function' as const,
+        type: 'function',
         function: {
           name: tool.name,
           description: tool.description,
           parameters: tool.parameters
         }
       })),
-      tool_choice: 'auto' as const
+      tool_choice: 'auto'
     };
 
-    const response = await this.client.chat.completions.create(body);
+    if (this.fallbackModels.length > 0) {
+      body.models = this.fallbackModels;
+    }
+
+    const response = await this.client.chat.completions.create(body as Parameters<OpenAI['chat']['completions']['create']>[0]);
     const message = response.choices[0]?.message;
     const toolCalls: ToolCall[] = [];
 

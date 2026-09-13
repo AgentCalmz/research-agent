@@ -6,13 +6,28 @@ The runtime is designed to hunt for concrete opportunities rather than merely ex
 
 ## Current brain
 
-The default brain is **Groq + `openai/gpt-oss-120b`**. Groq exposes an OpenAI-compatible API, and its current GPT-OSS 120B model supports tool use, browser search, code execution, structured outputs, reasoning, and a 131K context window. The code keeps the model configurable so other compatible providers/models can be added without changing the research runtime.
+The default brain is **OpenRouter + DeepSeek V4.1 Flash**. OpenRouter provides an OpenAI-compatible endpoint and can route tool-calling requests across providers; DeepSeek positions V4.1 Flash for coding, terminal/computer-use agents, and long-horizon tasks. The current listed price is $0.15/M input and $0.60/M output with a 1.05M context window. citehttps://openrouter.ai/provider/deepseek
+
+The brain is configurable and isolated behind `BrainProvider`, so stronger or cheaper models can be introduced without changing the local research runtime.
+
+## Local-first efficiency
+
+The model is **not** called for ordinary computation or web transport.
+
+- Web search, HTTP fetching, DNS, contact extraction, crawling, scoring, persistence, and deduplication run locally.
+- The default agent uses **3 model phases**: discovery, verification, final synthesis.
+- Phase 1 exposes only discovery tools; phase 2 exposes verification tools; phase 3 exposes no tools.
+- Independent tool calls are batched in parallel.
+- Raw HTML and large tool payloads are compacted locally before being returned to the model.
+- An optional fallback model is used only when the primary model/provider fails.
+
+This keeps the API for tasks that genuinely benefit from reasoning rather than using it as a general-purpose data pipeline.
 
 ## What is implemented
 
-- **Provider-isolated brain** with Groq as the first provider.
-- **GPT-OSS 120B** as the default agentic model.
-- **Tool-driven research loop** with bounded steps and parallel independent tool calls.
+- **Provider-isolated brain** with OpenRouter as the current provider.
+- **DeepSeek V4.1 Flash** as the default cost-efficient agentic model.
+- **Tool-driven research loop** with bounded phases and parallel independent tool calls.
 - **Free/configurable web discovery** using DuckDuckGo HTML search by default, or a SearXNG endpoint.
 - **Business discovery** across multiple public-web query patterns.
 - **Evidence gathering** from public pages, contacts, domains, and social profiles.
@@ -37,15 +52,15 @@ USER INTENT
     ↓
 OPPORTUNITY DEFINITION
     ↓
-DISCOVERY
+LOCAL DISCOVERY
     ↓
-INVESTIGATION
+LOCAL INVESTIGATION
     ↓
-VERIFICATION
+LOCAL VERIFICATION
     ↓
 DETERMINISTIC SCORING
     ↓
-PERSISTENCE
+ONE COMPACT FINAL SYNTHESIS
     ↓
 ACTIONABLE RESULTS + SOURCE LINKS
 ```
@@ -63,14 +78,17 @@ cp .env.example .env
 
 On Windows Git Bash, `cp` works; PowerShell users can use `Copy-Item .env.example .env`.
 
-Put your Groq API key in `.env`:
+Put your OpenRouter API key in `.env`:
 
 ```env
-GROQ_API_KEY=your_key_here
-GROQ_MODEL=openai/gpt-oss-120b
+OPENROUTER_API_KEY=your_key_here
+OPENROUTER_MODEL=deepseek/deepseek-v4.1-flash
+OPENROUTER_FALLBACK_MODELS=
 SEARCH_BACKEND=duckduckgo
-MAX_AGENT_STEPS=20
-MAX_REQUESTS=60
+MAX_AGENT_STEPS=3
+MAX_REQUESTS=40
+BRAIN_MIN_INTERVAL_MS=750
+BRAIN_MAX_OUTPUT_TOKENS=900
 REQUEST_TIMEOUT_MS=15000
 DATA_DIR=./data
 ```
@@ -103,29 +121,28 @@ Search availability, ranking, and rate limits vary by backend. The agent treats 
 ## Architecture
 
 ```text
-                  CONFIGURED BRAIN
-                 ┌───────────────┐
-                 │ Groq / GPT-OSS│
-                 │ reasoning     │
-                 │ planning      │
-                 │ tool calls    │
-                 └───────┬───────┘
-                         │
-                         ▼
-                LOCAL RESEARCH BODY
-        ┌────────────────┼────────────────┐
-        ▼                ▼                ▼
-     Discovery        Evidence         Memory
-     ├ search         ├ fetch           └ opportunities.jsonl
-     ├ businesses     ├ contacts
-     └ socials        ├ domain checks
-                      └ website status
-                         │
-                         ▼
-                  Opportunity Engine
-                  ├ score
-                  ├ rank
-                  └ explain with sources
+                    CONFIGURED BRAIN
+                 ┌────────────────────┐
+                 │ OpenRouter         │
+                 │ DeepSeek V4.1 Flash│
+                 └─────────┬──────────┘
+                           │ only at decision points
+                           ▼
+                  LOCAL RESEARCH BODY
+        ┌──────────────────┼──────────────────┐
+        ▼                  ▼                  ▼
+     Discovery           Evidence           Memory
+     ├ search            ├ fetch             └ opportunities.jsonl
+     ├ businesses        ├ contacts
+     └ socials            ├ domain checks
+                           └ website status
+        │                  │
+        └──────────┬───────┘
+                   ▼
+            Opportunity Engine
+            ├ score
+            ├ rank
+            └ explain with sources
 ```
 
 ## Important boundaries

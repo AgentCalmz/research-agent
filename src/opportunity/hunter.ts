@@ -107,8 +107,8 @@ function extractContacts(text: string): { phones: string[]; emails: string[] } {
 }
 
 function extractCompany(text: string): string | undefined {
-  const direct = text.match(/\b(?:at|@)\s+([A-Z][A-Za-z0-9&.' -]{2,80}?)(?:\.|\s+is\s+|\s+to\s+)/i);
-  if (direct?.[1]) return direct[1].trim();
+  const labeled = text.match(/\b(?:company|employer|company name|employer name)\s*[:\-]\s*([A-Z][A-Za-z0-9&.' -]{2,80}?)(?=\s{2,}|\.|$)/i);
+  if (labeled?.[1]) return labeled[1].trim();
 
   const recruiting = text.match(/([A-Z][A-Za-z0-9&.' -]{2,80}?)\s+is\s+(?:recruiting|hiring)\b/i);
   if (recruiting?.[1]) return recruiting[1].trim();
@@ -168,6 +168,8 @@ async function verifyJob(candidate: CandidateRecord, plan: ResearchPlan, search:
   }
 
   const company = candidate.facts.company || extractCompany(combinedText) || extractCompany(candidate.title || candidate.name);
+  const companyLooksLikeUiText = Boolean(company && /\b(hired in|sign up|similar job alerts|today|rest of nigeria)\b/i.test(company));
+  const verifiedCompany = companyLooksLikeUiText ? undefined : company;
   const postedAt = extractDate(combinedText);
   const fresh = postedAt ? ((Date.now() - postedAt.getTime()) / 86400000 <= plan.freshnessDays) : false;
   const applySignal = /apply now|apply|submit (?:cv|resume)|careers portal|how to apply|send (?:your )?(?:cv|resume)/i.test(combinedText);
@@ -183,7 +185,7 @@ async function verifyJob(candidate: CandidateRecord, plan: ResearchPlan, search:
   const preferenceMatch = plan.workPreference === 'any' || normalizedEvidence.includes(plan.workPreference || '') || normalizedJob.includes(plan.workPreference || '');
   const experienceMatch = !plan.experienceLevel || normalizedEvidence.includes(normalizeText(plan.experienceLevel)) || normalizedJob.includes(normalizeText(plan.experienceLevel));
   const excluded = plan.excludeTerms.some((term) => normalizedJob.includes(normalizeText(term)) || normalizedEvidence.includes(normalizeText(term)));
-  if (company) evidenceItems.push(evidence(candidate.sourceUrl, 'search', `Employer identified as ${company}.`, undefined, 0.8));
+  if (verifiedCompany) evidenceItems.push(evidence(candidate.sourceUrl, 'search', `Employer identified as ${verifiedCompany}.`, undefined, 0.8));
   if (fresh) evidenceItems.push(evidence(candidate.sourceUrl, 'search', `Posting appears within the requested ${plan.freshnessDays}-day freshness window.`, undefined, 0.8));
   if (applySignal) evidenceItems.push(evidence(candidate.sourceUrl, 'website', 'Page contains an application signal.', undefined, 0.75));
 
@@ -192,7 +194,7 @@ async function verifyJob(candidate: CandidateRecord, plan: ResearchPlan, search:
     sources,
     facts: {
       ...candidate.facts,
-      company,
+      company: verifiedCompany,
       postedAt: postedAt?.toISOString(),
       hasApply: applySignal,
       phones: jobContacts.phones.join(', '),
@@ -204,8 +206,8 @@ async function verifyJob(candidate: CandidateRecord, plan: ResearchPlan, search:
       excluded
     },
     evidence: evidenceItems,
-    status: excluded ? 'rejected' : directListing && jobContentSignal && company ? 'verified' : 'uncertain',
-    confidence: excluded ? 0 : Math.min(1, 0.45 + (directListing && jobContentSignal ? 0.2 : 0) + Math.min(0.2, sources.length * 0.06) + (company ? 0.12 : 0) + (fresh ? 0.12 : 0) + (skillsMatch ? 0.08 : 0)),
+    status: excluded ? 'rejected' : directListing && jobContentSignal && verifiedCompany ? 'verified' : 'uncertain',
+    confidence: excluded ? 0 : Math.min(1, 0.45 + (directListing && jobContentSignal ? 0.2 : 0) + Math.min(0.2, sources.length * 0.06) + (verifiedCompany ? 0.12 : 0) + (fresh ? 0.12 : 0) + (skillsMatch ? 0.08 : 0)),
     score: excluded ? 0 : scoreJob(candidate, sources.length, fresh, applySignal, roleMatch, skillsMatch, preferenceMatch, experienceMatch)
   };
 }

@@ -9,7 +9,6 @@ export type Config = {
   deepSeekModel: string;
   searchBackend: 'duckduckgo' | 'searxng';
   searxngUrl?: string;
-  maxAgentSteps: number;
   maxRequests: number;
   requestTimeoutMs: number;
   brainMinIntervalMs: number;
@@ -60,7 +59,6 @@ export function loadConfig(): Config {
     deepSeekModel: process.env.DEEPSEEK_MODEL ?? 'deepseek-flash',
     searchBackend,
     searxngUrl: process.env.SEARXNG_URL,
-    maxAgentSteps: intEnv('MAX_AGENT_STEPS', 3),
     maxRequests: intEnv('MAX_REQUESTS', 40),
     requestTimeoutMs: intEnv('REQUEST_TIMEOUT_MS', 15000),
     brainMinIntervalMs: intEnv('BRAIN_MIN_INTERVAL_MS', 750),

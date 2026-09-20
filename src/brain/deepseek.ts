@@ -45,7 +45,7 @@ export class DeepSeekBrain implements BrainProvider {
     const response = await this.client.chat.completions.create({
       model: this.model,
       max_tokens: this.maxOutputTokens,
-      reasoning_effort: 'low',
+      thinking: { type: 'disabled' as const },
       messages: [
         { role: 'system', content: `${SYSTEM}\n\n${input.system}` },
         { role: 'user', content: input.user }
@@ -59,7 +59,7 @@ export class DeepSeekBrain implements BrainProvider {
           strict: false
         }
       })),
-      tool_choice: input.tools.length > 0 ? 'auto' : 'none'
+      tool_choice: input.tools.length > 0 ? 'required' : 'none'
     });
 
     const message = response.choices[0]?.message;

@@ -52,7 +52,7 @@ export function defaultPlan(request: string): ResearchPlan {
     categories,
     queries: buildQueries({ mode, location, roles, categories }),
     candidateLimit: mode === 'jobs' ? 40 : 30,
-    verifyLimit: mode === 'jobs' ? 14 : 12,
+    verifyLimit: mode === 'jobs' ? 8 : 6,
     sourceDomains: mode === 'jobs' ? JOB_SOURCES : BUSINESS_SOURCE_HINTS,
     freshnessDays: mode === 'jobs' ? 30 : 180,
     verificationDepth: 'standard'

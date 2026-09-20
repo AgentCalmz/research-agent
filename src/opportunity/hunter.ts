@@ -168,7 +168,7 @@ async function verifyJob(candidate: CandidateRecord, plan: ResearchPlan, search:
   }
 
   const company = candidate.facts.company || extractCompany(combinedText) || extractCompany(candidate.title || candidate.name);
-  const companyLooksLikeUiText = Boolean(company && /\b(hired in|sign up|similar job alerts|today|rest of nigeria)\b/i.test(company));
+  const companyLooksLikeUiText = typeof company === 'string' && /\b(hired in|sign up|similar job alerts|today|rest of nigeria)\b/i.test(company);
   const verifiedCompany = companyLooksLikeUiText ? undefined : company;
   const postedAt = extractDate(combinedText);
   const fresh = postedAt ? ((Date.now() - postedAt.getTime()) / 86400000 <= plan.freshnessDays) : false;

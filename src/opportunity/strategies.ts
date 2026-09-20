@@ -1,6 +1,6 @@
 import type { SearchResult } from '../discovery/search.js';
 import { normalizeText, hostOf } from './entities.js';
-import { isBusinessIndexUrl, isJobIndexUrl, isJobListingUrl, isJobProfileUrl, isSearchNoise } from './source-policy.js';
+import { isBusinessIndexUrl, isLikelyJobListing, isJobProfileUrl, isSearchNoise } from './source-policy.js';
 import type { HuntMode, ResearchPlan } from './types.js';
 
 const JOB_SOURCES = [
@@ -166,7 +166,7 @@ export function candidateFromResult(result: SearchResult, mode: HuntMode, locati
   if (!cleanTitle) return null;
   if (mode === 'business_website_gap' && (NOISE_PATTERNS.some((pattern) => pattern.test(cleanTitle)) || isSearchNoise(cleanTitle, result.snippet))) return null;
   if (mode === 'business_website_gap' && isBusinessIndexUrl(result.url) && !/\/company\//i.test(result.url)) return null;
-  if (mode === 'jobs' && (isJobProfileUrl(result.url) || isJobIndexUrl(result.url) || !isJobListingUrl(result.url))) return null;
+  if (mode === 'jobs' && !isLikelyJobListing(result.url, cleanTitle, result.snippet)) return null;
 
   const host = hostOf(result.url);
   const kind = mode === 'jobs' ? 'job' : mode === 'business_website_gap' ? 'business' : 'other';
@@ -180,7 +180,7 @@ export function candidateFromResult(result: SearchResult, mode: HuntMode, locati
     facts: {
       sourceHost: host,
       sourceType: result.source,
-      company: kind === 'job' ? extractJobCompany(cleanTitle) : undefined
+      company: kind === 'job' ? (extractJobCompany(cleanTitle) || extractJobCompany(result.snippet || '')) : undefined
     }
   };
 }

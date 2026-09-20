@@ -3,6 +3,7 @@ export function normalizeText(value: string): string {
     .toLowerCase()
     .replace(/&amp;/g, 'and')
     .replace(/[^a-z0-9]+/g, ' ')
+    .replace(/\b(limited|ltd|incorporated|inc|llc|plc|company|co)\b/g, ' ')
     .replace(/\s+/g, ' ')
     .trim();
 }

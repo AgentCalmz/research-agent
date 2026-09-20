@@ -3,7 +3,7 @@ import { loadConfig } from './core/config.js';
 import { OpenRouterBrain } from './brain/openrouter.js';
 import { DeepSeekBrain } from './brain/deepseek.js';
 import { DuckDuckGoSearch, SearxngSearch } from './discovery/search.js';
-import { ResearchAgent } from './runtime/agent.js';
+import { OpportunityHunter } from './opportunity/hunter.js';
 import { registerBuiltinTools } from './runtime/builtin-tools.js';
 import { registerDiscoveryTools } from './runtime/discovery-tools.js';
 import { configureHttp } from './runtime/http.js';

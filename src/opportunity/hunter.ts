@@ -131,14 +131,16 @@ function extractDate(text: string): Date | undefined {
   return undefined;
 }
 
-function scoreJob(candidate: CandidateRecord, sourceCount: number, fresh: boolean, hasApply: boolean, roleMatch: boolean): number {
-  let score = 4;
+function scoreJob(candidate: CandidateRecord, sourceCount: number, fresh: boolean, hasApply: boolean, roleMatch: boolean, skillsMatch: boolean, preferenceMatch: boolean, experienceMatch: boolean): number {
+  let score = 3.5;
   if (sourceCount >= 2) score += 1.5;
   if (fresh) score += 2;
-  if (hasApply) score += 1;
-  if (candidate.facts.company) score += 0.5;
-  if (candidate.facts.location) score += 0.5;
-  if (roleMatch) score += 1;
+  if (hasApply) score += 0.8;
+  if (candidate.facts.company) score += 0.4;
+  if (roleMatch) score += 0.9;
+  if (skillsMatch) score += 0.9;
+  if (preferenceMatch) score += 0.7;
+  if (experienceMatch) score += 0.6;
   return Math.min(10, Number(score.toFixed(1)));
 }
 
@@ -170,8 +172,14 @@ async function verifyJob(candidate: CandidateRecord, plan: ResearchPlan, search:
   const fresh = postedAt ? ((Date.now() - postedAt.getTime()) / 86400000 <= plan.freshnessDays) : false;
   const applySignal = /apply now|apply|submit (?:cv|resume)|careers portal/i.test(combinedText);
   const roleTokens = plan.roles.flatMap((role) => normalizeText(role).split(' ').filter((token) => token.length >= 3));
+  const skillTokens = plan.skills.flatMap((skill) => normalizeText(skill).split(' ').filter((token) => token.length >= 3));
   const normalizedJob = normalizeText(candidate.title || candidate.name);
-  const roleMatch = roleTokens.length > 0 && roleTokens.filter((token) => normalizedJob.includes(token)).length / roleTokens.length >= 0.5;
+  const normalizedEvidence = normalizeText(combinedText);
+  const roleMatch = roleTokens.length > 0 && roleTokens.filter((token) => normalizedJob.includes(token) || normalizedEvidence.includes(token)).length / roleTokens.length >= 0.5;
+  const skillsMatch = skillTokens.length > 0 && skillTokens.filter((token) => normalizedJob.includes(token) || normalizedEvidence.includes(token)).length / skillTokens.length >= 0.5;
+  const preferenceMatch = plan.workPreference === 'any' || normalizedEvidence.includes(plan.workPreference || '') || normalizedJob.includes(plan.workPreference || '');
+  const experienceMatch = !plan.experienceLevel || normalizedEvidence.includes(normalizeText(plan.experienceLevel)) || normalizedJob.includes(normalizeText(plan.experienceLevel));
+  const excluded = plan.excludeTerms.some((term) => normalizedJob.includes(normalizeText(term)) || normalizedEvidence.includes(normalizeText(term)));
   if (company) evidenceItems.push(evidence(candidate.sourceUrl, 'search', `Employer identified as ${company}.`, undefined, 0.8));
   if (fresh) evidenceItems.push(evidence(candidate.sourceUrl, 'search', `Posting appears within the requested ${plan.freshnessDays}-day freshness window.`, undefined, 0.8));
   if (applySignal) evidenceItems.push(evidence(candidate.sourceUrl, 'website', 'Page contains an application signal.', undefined, 0.75));
@@ -183,12 +191,17 @@ async function verifyJob(candidate: CandidateRecord, plan: ResearchPlan, search:
       ...candidate.facts,
       company,
       postedAt: postedAt?.toISOString(),
-      hasApply: applySignal
+      hasApply: applySignal,
+      roleMatch,
+      skillsMatch,
+      preferenceMatch,
+      experienceMatch,
+      excluded
     },
     evidence: evidenceItems,
-    status: sources.length >= 2 ? 'verified' : 'uncertain',
-    confidence: Math.min(1, 0.45 + Math.min(0.25, sources.length * 0.08) + (company ? 0.12 : 0) + (fresh ? 0.12 : 0)),
-    score: scoreJob(candidate, sources.length, fresh, applySignal, roleMatch)
+    status: excluded ? 'rejected' : sources.length >= 2 ? 'verified' : 'uncertain',
+    confidence: excluded ? 0 : Math.min(1, 0.45 + Math.min(0.25, sources.length * 0.08) + (company ? 0.12 : 0) + (fresh ? 0.12 : 0) + (skillsMatch ? 0.08 : 0)),
+    score: excluded ? 0 : scoreJob(candidate, sources.length, fresh, applySignal, roleMatch, skillsMatch, preferenceMatch, experienceMatch)
   };
 }
 

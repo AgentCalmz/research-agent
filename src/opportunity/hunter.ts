@@ -4,6 +4,7 @@ import type { SearchProvider, SearchResult } from '../discovery/search.js';
 import { cleanHtml, fetchText } from '../runtime/http.js';
 import { OpportunityStore } from '../runtime/store.js';
 import { canonicalizeUrl, hostOf, normalizeText, sameEntity } from './entities.js';
+import { isJobListingUrl, isSocialUrl, isDirectoryUrl, isEditorialUrl, looksLikeIndependentBusinessSite } from './source-policy.js';
 import { candidateFromResult, defaultPlan, buildQueries } from './strategies.js';
 import type { CandidateRecord, HuntMode, ResearchPlan } from './types.js';
 
@@ -88,12 +89,7 @@ function sourceKind(url: string): Evidence['source']['sourceType'] {
 }
 
 function looksLikeIndependentWebsite(url: string): boolean {
-  const host = hostOf(url);
-  if (!host) return false;
-  if (SOCIAL_HOSTS.has(host)) return false;
-  if (/google\.|bing\.|duckduckgo\.|youtube\.|wikipedia\./i.test(host)) return false;
-  if (DIRECTORY_HINTS.test(host)) return false;
-  return true;
+  return looksLikeIndependentBusinessSite(url);
 }
 
 function nameMatch(candidateName: string, pageText: string): number {
@@ -151,9 +147,7 @@ async function verifyJob(candidate: CandidateRecord, plan: ResearchPlan, search:
   const evidenceItems = [...candidate.evidence];
   let combinedText = sources.map((result) => result.snippet || '').join(' ');
 
-  const fetchTargets = sources
-.filter((result) => !SOCIAL_HOSTS.has(hostOf(result.url)))
-    .slice(0, 1);
+  const fetchTargets = sources.filter((result) => isJobListingUrl(result.url)).slice(0, 1);
 
   for (const result of fetchTargets) {
     try {
@@ -170,7 +164,9 @@ async function verifyJob(candidate: CandidateRecord, plan: ResearchPlan, search:
   const company = candidate.facts.company || extractCompany(candidate.title || candidate.name);
   const postedAt = extractDate(combinedText);
   const fresh = postedAt ? ((Date.now() - postedAt.getTime()) / 86400000 <= plan.freshnessDays) : false;
-  const applySignal = /apply now|apply|submit (?:cv|resume)|careers portal/i.test(combinedText);
+  const applySignal = /apply now|apply|submit (?:cv|resume)|careers portal|how to apply|send (?:your )?(?:cv|resume)/i.test(combinedText);
+  const directListing = isJobListingUrl(candidate.sourceUrl);
+  const jobContentSignal = /(?:responsibilit|requirements?|qualifications?|experience|how to apply|apply now|recruiting|vacancy|position|job description)/i.test(combinedText);
   const roleTokens = plan.roles.flatMap((role) => normalizeText(role).split(' ').filter((token) => token.length >= 3));
   const skillTokens = plan.skills.flatMap((skill) => normalizeText(skill).split(' ').filter((token) => token.length >= 3));
   const normalizedJob = normalizeText(candidate.title || candidate.name);
@@ -199,8 +195,8 @@ async function verifyJob(candidate: CandidateRecord, plan: ResearchPlan, search:
       excluded
     },
     evidence: evidenceItems,
-    status: excluded ? 'rejected' : sources.length >= 2 ? 'verified' : 'uncertain',
-    confidence: excluded ? 0 : Math.min(1, 0.45 + Math.min(0.25, sources.length * 0.08) + (company ? 0.12 : 0) + (fresh ? 0.12 : 0) + (skillsMatch ? 0.08 : 0)),
+    status: excluded ? 'rejected' : directListing && jobContentSignal && company ? 'verified' : 'uncertain',
+    confidence: excluded ? 0 : Math.min(1, 0.45 + (directListing && jobContentSignal ? 0.2 : 0) + Math.min(0.2, sources.length * 0.06) + (company ? 0.12 : 0) + (fresh ? 0.12 : 0) + (skillsMatch ? 0.08 : 0)),
     score: excluded ? 0 : scoreJob(candidate, sources.length, fresh, applySignal, roleMatch, skillsMatch, preferenceMatch, experienceMatch)
   };
 }

@@ -25,6 +25,33 @@ test('business strategy rejects generic listicle candidates', () => {
   assert.equal(result, null);
 });
 
+test('extracts the business name from SEO-style titles', () => {
+  const result = candidateFromResult(
+    { title: 'Best Spa & Salon Abuja | Luxor Spa & Salon', url: 'https://luxorsalonandspa.com', source: 'duckduckgo' },
+    'business_website_gap',
+    'Abuja'
+  );
+  assert.equal(result, null);
+});
+
+test('extracts the business name from SEO-style titles', () => {
+  const result = candidateFromResult(
+    { title: 'Best Spa & Salon Abuja | Luxor Spa & Salon', url: 'https://luxorsalonandspa.com', source: 'duckduckgo' },
+    'business_website_gap',
+    'Abuja'
+  );
+  assert.equal(result, null);
+});
+
+test('cleans SEO prefixes when the business is discovered from social media', () => {
+  const result = candidateFromResult(
+    { title: 'Best Spa & Salon Abuja | Luxor Spa & Salon - Instagram', url: 'https://www.instagram.com/luxorsalonandspa/', source: 'duckduckgo' },
+    'business_website_gap',
+    'Abuja'
+  );
+  assert.equal(result?.name, 'Luxor Spa & Salon');
+});
+
 test('accepts a concrete business listing', () => {
   const result = candidateFromResult(
     { title: 'Food Hub Services - Abuja, Nigeria - Contact Number', url: 'https://www.businesslist.com.ng/company/254728/food-hub-services', source: 'duckduckgo', snippet: 'Food Hub Services based in Abuja, Nigeria established in 2015.' },

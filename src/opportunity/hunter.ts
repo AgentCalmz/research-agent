@@ -1,7 +1,7 @@
 import { randomUUID } from 'node:crypto';
 import type { BrainProvider, Evidence, Opportunity } from '../core/types.js';
 import type { SearchProvider, SearchResult } from '../discovery/search.js';
-import { cleanHtml, fetchText } from '../runtime/http.js';
+import { cleanHtml, fetchText, getRequestCount } from '../runtime/http.js';
 import { OpportunityStore } from '../runtime/store.js';
 import { canonicalizeUrl, hostOf, normalizeText, sameEntity } from './entities.js';
 import { isJobListingUrl, isLikelyJobListing, looksLikeIndependentBusinessSite } from './source-policy.js';
@@ -100,10 +100,26 @@ function nameMatch(candidateName: string, pageText: string): number {
 }
 
 function extractContacts(text: string): { phones: string[]; emails: string[] } {
-  return {
-    phones: [...new Set(text.match(/(?:\+?234|0)[ -]?(?:7\d{2}|8\d{2}|9\d{2})[ -]?\d{3}[ -]?\d{4}/g) ?? [])],
-    emails: [...new Set(text.match(/[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}/gi) ?? [])]
-  };
+  const phones = [...new Set(text.match(/(?:\+?234|0)[ -]?(?:7\d{2}|8\d{2}|9\d{2})[ -]?\d{3}[ -]?\d{4}/g) ?? [])];
+  const emails = [...new Set(text.match(/[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}/gi) ?? [])]
+    .filter((email) => !/^(?:anonymous|example|test|demo|sample|noreply|no-reply)@/i.test(email))
+    .filter((email) => !/(?:^|\.)example\.(?:com|org|net)$/i.test(email.split('@')[1] || ''))
+    .filter((email) => !/^anonymous\.[a-z]{2,}$/i.test(email.split('@')[1] || ''));
+  return { phones, emails };
+}
+
+async function brainCompleteWithRetry(
+  brain: BrainProvider,
+  input: Parameters<BrainProvider['complete']>[0]
+): Promise<Awaited<ReturnType<BrainProvider['complete']>> | null> {
+  for (let attempt = 0; attempt < 2; attempt += 1) {
+    try {
+      return await brain.complete(input);
+    } catch {
+      if (attempt === 0) await new Promise((resolve) => setTimeout(resolve, 700));
+    }
+  }
+  return null;
 }
 
 function extractCompany(text: string): string | undefined {
@@ -148,7 +164,7 @@ function scoreJob(candidate: CandidateRecord, sourceCount: number, fresh: boolea
 
 async function verifyJob(candidate: CandidateRecord, plan: ResearchPlan, search: SearchProvider): Promise<CandidateRecord> {
   const query = `"${candidate.title || candidate.name}" ${candidate.facts.company ? `"${candidate.facts.company}" ` : ''}${plan.location || ''}`;
-  const results = await parallelSearch(search, [query, `"${candidate.name}" ${plan.location || ''} apply`], 4);
+  const results = await parallelSearch(search, [query], 6);
   const sources = uniqueResults([...candidate.sources, ...results]);
   const evidenceItems = [...candidate.evidence];
   let combinedText = sources.map((result) => result.snippet || '').join(' ');
@@ -216,11 +232,10 @@ async function verifyBusiness(candidate: CandidateRecord, plan: ResearchPlan, se
   const location = plan.location || '';
   const name = candidate.name;
   const queries = [
-    `"${name}" "${location}" official website`,
-    `"${name}" "${location}" phone`,
+    `"${name}" "${location}" official website phone`,
     `"${name}" "${location}" Instagram OR Facebook`
   ];
-  const results = await parallelSearch(search, queries, 4);
+  const results = await parallelSearch(search, queries, 5);
   const sources = uniqueResults([...candidate.sources, ...results]);
   const evidenceItems = [...candidate.evidence];
   let socialUrls: string[] = [];
@@ -236,12 +251,19 @@ async function verifyBusiness(candidate: CandidateRecord, plan: ResearchPlan, se
   contactPhones.push(...snippetContacts.phones);
   contactEmails.push(...snippetContacts.emails);
 
+  const websiteFetchTargets = sources
+    .filter((result) => !/top\s+\d+|best\s+\d+|without websites|businesses without websites|directory|category|list of/i.test(result.title || ''))
+    .filter((result) => looksLikeIndependentWebsite(result.url))
+    .sort((a, b) => nameMatch(name, `${b.title} ${b.snippet || ''}`) - nameMatch(name, `${a.title} ${a.snippet || ''}`))
+    .slice(0, 2);
+  const websiteTargetSet = new Set(websiteFetchTargets.map((result) => result.url));
+
   for (const result of sources.slice(0, 10)) {
     const genericPage = /top\s+\d+|best\s+\d+|without websites|businesses without websites|directory|category|list of/i.test(result.title || '') ||
       /without websites|directory|category|list of/i.test(result.snippet || '');
     const kind = sourceKind(result.url);
     if (kind === 'social') socialUrls.push(result.url);
-    if (genericPage || !looksLikeIndependentWebsite(result.url)) continue;
+    if (genericPage || !looksLikeIndependentWebsite(result.url) || !websiteTargetSet.has(result.url)) continue;
     independentCandidateUrls.push(result.url);
     try {
       const response = await fetchText(result.url);
@@ -437,13 +459,13 @@ export class OpportunityHunter {
   ) {}
 
   async run(request: string): Promise<string> {
-    const planResponse = await this.brain.complete({
+    const planResponse = await brainCompleteWithRetry(this.brain, {
       system: 'You are the planning brain for an autonomous opportunity hunter. Produce a compact plan only by calling set_research_plan. Do not browse the web yourself.',
       user: request,
       tools: [PLAN_TOOL]
     });
 
-    const planArgs = planResponse.toolCalls[0]?.arguments ?? {};
+    const planArgs = planResponse?.toolCalls[0]?.arguments ?? {};
     const plan = sanitizePlan(request, planArgs);
     const discovery = await parallelSearch(this.search, plan.queries, MAX_DISCOVERY_RESULTS_PER_QUERY);
     let candidates = mergeCandidates(discovery, plan.mode, plan.location).slice(0, plan.candidateLimit);
@@ -468,8 +490,8 @@ export class OpportunityHunter {
     const strongTarget = Math.min(plan.requestedCount, 3);
     const strongCount = verified.filter((candidate) => isEligibleCandidate(candidate, plan.mode) && candidate.score >= 5).length;
 
-    if (strongCount < strongTarget) {
-      const refineResponse = await this.brain.complete({
+    if (strongCount < strongTarget && getRequestCount() < 32) {
+      const refineResponse = await brainCompleteWithRetry(this.brain, {
         system: 'The first local discovery pass was weak. Request at most three genuinely different discovery queries. Do not repeat previous query wording.',
         user: [
           `Objective: ${request}`,
@@ -480,7 +502,7 @@ export class OpportunityHunter {
         ].join('\\n'),
         tools: [REFINE_TOOL]
       });
-      const refineQueries = Array.isArray(refineResponse.toolCalls[0]?.arguments?.queries)
+      const refineQueries = Array.isArray(refineResponse?.toolCalls[0]?.arguments?.queries)
         ? refineResponse.toolCalls[0]!.arguments.queries.filter((value): value is string => typeof value === 'string').slice(0, 3)
         : [];
       if (refineQueries.length) {
@@ -529,13 +551,13 @@ export class OpportunityHunter {
 
     const envelopeLimit = Math.min(20, Math.max(8, plan.requestedCount * 2));
     const evidenceEnvelope = eligibleCandidates.slice(0, envelopeLimit).map(compactCandidate).join('\n');
-    const finalResponse = await this.brain.complete({
+    const finalResponse = await brainCompleteWithRetry(this.brain, {
       system: `You are the final decision and synthesis brain. Do not invent missing facts. Use only the compact evidence envelope supplied below. Return at most ${plan.requestedCount} opportunities. Prefer verified candidates; clearly label any uncertain candidate instead of presenting it as verified. For jobs, include employer, location, freshness, fit signals, and application/source URLs when present. For business website-gap opportunities, explain why the evidence supports the digital gap and list public contact/source URLs.\n\nEvidence envelope:\n${evidenceEnvelope}`,
       user: request,
       tools: []
     });
 
-    const synthesized = finalResponse.text?.trim();
+    const synthesized = finalResponse?.text?.trim();
     if (synthesized && !/^\s*[{[]\"?id/i.test(synthesized)) return synthesized;
     return renderDeterministicResults(candidates, plan.mode, plan.requestedCount);
   }

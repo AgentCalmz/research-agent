@@ -29,6 +29,9 @@ export class DuckDuckGoSearch implements SearchProvider {
     const html = await response.text();
     const results: SearchResult[] = [];
     const linkRe = /<a[^>]*class=["'][^"']*result__a[^"']*["'][^>]*href=["']([^"']+)["'][^>]*>([\s\S]*?)<\/a>/gi;
+    const snippetRe = /<a[^>]*class=["'][^"']*result__snippet[^"']*["'][^>]*>([\s\S]*?)<\/a>/gi;
+    const snippets = [...html.matchAll(snippetRe)].map((match) => match[1] ? cleanHtml(match[1], 700) : '');
+    let index = 0;
 
     for (const match of html.matchAll(linkRe)) {
       const rawHref = match[1];

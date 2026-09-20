@@ -61,7 +61,7 @@ export function defaultPlan(request: string): ResearchPlan {
 }
 
 function extractRequestedCount(request: string): number {
-  const match = request.match(/\\b(?:find|get|return|give me|top)\\s+(\\d{1,3})\\b/i);
+  const match = request.match(/\b(?:find|get|return|give me|top)\s+(\d{1,3})\b/i);
   const count = Number(match?.[1] ?? 10);
   return Number.isFinite(count) ? Math.max(1, Math.min(100, Math.floor(count))) : 10;
 }

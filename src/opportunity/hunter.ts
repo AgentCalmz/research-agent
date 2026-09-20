@@ -38,12 +38,21 @@ function mergeCandidates(results: SearchResult[], mode: HuntMode, location?: str
     const base = candidateFromResult(result, mode, location);
     if (!base) continue;
     const candidate = base as Omit<CandidateRecord, 'id' | 'evidence' | 'status' | 'confidence' | 'score'>;
-    const existing = output.find((item) =>
-      sameEntity(
+    const existing = output.find((item) => {
+      if (item.kind !== candidate.kind) return false;
+      if (candidate.kind === 'job') {
+        const leftCompany = typeof item.facts.company === 'string' ? item.facts.company : '';
+        const rightCompany = typeof candidate.facts.company === 'string' ? candidate.facts.company : '';
+        const companyMatches = Boolean(leftCompany && rightCompany && normalizeText(leftCompany) === normalizeText(rightCompany));
+        return companyMatches
+          ? sameEntity({ name: item.name, location: item.location }, { name: candidate.name, location: candidate.location })
+          : Boolean(item.name && candidate.name && normalizeText(item.name) === normalizeText(candidate.name) && item.location === candidate.location);
+      }
+      return sameEntity(
         { name: item.name, location: item.location, phone: typeof item.facts.phone === 'string' ? item.facts.phone : undefined },
         { name: candidate.name, location: candidate.location }
-      )
-    );
+      );
+    });
     if (existing) {
       existing.sources.push(result);
       continue;

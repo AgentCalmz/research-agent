@@ -171,6 +171,7 @@ async function verifyJob(candidate: CandidateRecord, plan: ResearchPlan, search:
   const postedAt = extractDate(combinedText);
   const fresh = postedAt ? ((Date.now() - postedAt.getTime()) / 86400000 <= plan.freshnessDays) : false;
   const applySignal = /apply now|apply|submit (?:cv|resume)|careers portal|how to apply|send (?:your )?(?:cv|resume)/i.test(combinedText);
+  const jobContacts = extractContacts(combinedText);
   const directListing = isLikelyJobListing(candidate.sourceUrl, candidate.title || candidate.name, candidate.sources[0]?.snippet);
   const jobContentSignal = /(?:responsibilit|requirements?|qualifications?|experience|how to apply|apply now|recruiting|vacancy|position|job description)/i.test(combinedText);
   const roleTokens = plan.roles.flatMap((role) => normalizeText(role).split(' ').filter((token) => token.length >= 3));
@@ -194,6 +195,8 @@ async function verifyJob(candidate: CandidateRecord, plan: ResearchPlan, search:
       company,
       postedAt: postedAt?.toISOString(),
       hasApply: applySignal,
+      phones: jobContacts.phones.join(', '),
+      emails: jobContacts.emails.join(', '),
       roleMatch,
       skillsMatch,
       preferenceMatch,
@@ -222,8 +225,14 @@ async function verifyBusiness(candidate: CandidateRecord, plan: ResearchPlan, se
   let reachableIndependent = false;
   let independentCandidateUrls: string[] = [];
   let publicContact = false;
+  let contactPhones: string[] = [];
+  let contactEmails: string[] = [];
   let matchedWebsiteUrl: string | undefined;
   let combinedText = sources.map((result) => result.snippet || '').join(' ');
+  const snippetContacts = extractContacts(combinedText);
+  if (snippetContacts.phones.length || snippetContacts.emails.length) publicContact = true;
+  contactPhones.push(...snippetContacts.phones);
+  contactEmails.push(...snippetContacts.emails);
 
   for (const result of sources.slice(0, 10)) {
     const genericPage = /top\s+\d+|best\s+\d+|without websites|businesses without websites|directory|category|list of/i.test(result.title || '') ||
@@ -239,6 +248,8 @@ async function verifyBusiness(candidate: CandidateRecord, plan: ResearchPlan, se
       combinedText += ` ${text}`;
       const contacts = extractContacts(text);
       if (contacts.phones.length || contacts.emails.length) publicContact = true;
+      contactPhones.push(...contacts.phones);
+      contactEmails.push(...contacts.emails);
       if (response.ok && nameMatch(name, text) >= 0.55) {
         reachableIndependent = true;
         matchedWebsiteUrl = response.url;
@@ -275,6 +286,8 @@ async function verifyBusiness(candidate: CandidateRecord, plan: ResearchPlan, se
       candidateWebsiteUrls: independentCandidateUrls.join(','),
       matchedWebsiteUrl,
       publicContact,
+      phones: [...new Set(contactPhones)].join(', '),
+      emails: [...new Set(contactEmails)].join(', '),
       socialOnly,
       noIndependentWebsite
     },

@@ -1,5 +1,6 @@
 import type { SearchResult } from '../discovery/search.js';
 import { normalizeText, hostOf } from './entities.js';
+import { isBusinessIndexUrl, isJobIndexUrl, isJobListingUrl, isJobProfileUrl, isSearchNoise } from './source-policy.js';
 import type { HuntMode, ResearchPlan } from './types.js';
 
 const JOB_SOURCES = [
@@ -163,13 +164,15 @@ function requestish(input: { roles?: string[]; categories?: string[] }): string 
 export function candidateFromResult(result: SearchResult, mode: HuntMode, location?: string) {
   const cleanTitle = cleanResultTitle(result.title);
   if (!cleanTitle) return null;
-  if (NOISE_PATTERNS.some((pattern) => pattern.test(cleanTitle)) && mode === 'business_website_gap') return null;
+  if (mode === 'business_website_gap' && (NOISE_PATTERNS.some((pattern) => pattern.test(cleanTitle)) || isSearchNoise(cleanTitle, result.snippet))) return null;
+  if (mode === 'business_website_gap' && isBusinessIndexUrl(result.url) && !/\/company\//i.test(result.url)) return null;
+  if (mode === 'jobs' && (isJobProfileUrl(result.url) || isJobIndexUrl(result.url) || !isJobListingUrl(result.url))) return null;
 
   const host = hostOf(result.url);
   const kind = mode === 'jobs' ? 'job' : mode === 'business_website_gap' ? 'business' : 'other';
   return {
     kind,
-    name: kind === 'job' ? extractJobName(cleanTitle) : cleanTitle,
+    name: kind === 'job' ? extractJobName(cleanTitle) : cleanBusinessName(cleanTitle),
     title: kind === 'job' ? cleanTitle : undefined,
     location,
     sourceUrl: result.url,
@@ -180,6 +183,14 @@ export function candidateFromResult(result: SearchResult, mode: HuntMode, locati
       company: kind === 'job' ? extractJobCompany(cleanTitle) : undefined
     }
   };
+}
+
+function cleanBusinessName(title: string): string {
+  return title
+    .replace(/\s*[-|]\s*(?:Abuja|Abuja,?\s*Nigeria|Nigeria).*$/i, '')
+    .replace(/\s*[-|]\s*Contact.*$/i, '')
+    .replace(/\s*[-|]\s*(?:Instagram|Facebook|LinkedIn).*$/i, '')
+    .trim();
 }
 
 function cleanResultTitle(title: string): string {

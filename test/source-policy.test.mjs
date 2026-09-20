@@ -29,6 +29,26 @@ test('rejects business directory/editorial pages as businesses', () => {
   assert.equal(candidateFromResult({ title: 'Best Businesses in Abuja, FCT | Ranked', url: 'https://ranked.ng/city/abuja', source: 'duckduckgo' }, 'business_website_gap', 'Abuja'), null);
 });
 
+test('rejects ranked editorial pages and direct business websites as gap candidates', () => {
+  assert.equal(isSearchNoise('Best Salons in Abuja - Ranked'), true);
+  assert.equal(
+    candidateFromResult(
+      { title: 'Best Salons in Abuja - Ranked', url: 'https://ranked.ng/salons/abuja', source: 'duckduckgo' },
+      'business_website_gap',
+      'Abuja'
+    ),
+    null
+  );
+  assert.equal(
+    candidateFromResult(
+      { title: 'Luxor Spa & Salon Abuja', url: 'https://luxorsalonandspa.com', source: 'duckduckgo' },
+      'business_website_gap',
+      'Abuja'
+    ),
+    null
+  );
+});
+
 test('recognizes concrete social profiles as social sources', () => {
   assert.equal(isSocialUrl('https://www.instagram.com/examplebusiness/'), true);
 });

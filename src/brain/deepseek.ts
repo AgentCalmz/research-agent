@@ -42,10 +42,10 @@ export class DeepSeekBrain implements BrainProvider {
   async complete(input: { system: string; user: string; tools: ToolDefinition[] }): Promise<BrainResponse> {
     await this.pace();
 
-    const response = await this.client.chat.completions.create({
+    const body = {
       model: this.model,
       max_tokens: this.maxOutputTokens,
-      thinking: { type: 'disabled' as const },
+      extra_body: { thinking: { type: 'disabled' as const } },
       messages: [
         { role: 'system', content: `${SYSTEM}\n\n${input.system}` },
         { role: 'user', content: input.user }
@@ -60,7 +60,9 @@ export class DeepSeekBrain implements BrainProvider {
         }
       })),
       tool_choice: input.tools.length > 0 ? 'required' : 'none'
-    });
+    } as unknown as OpenAI.Chat.ChatCompletionCreateParamsNonStreaming;
+
+    const response = await this.client.chat.completions.create(body);
 
     const message = response.choices[0]?.message;
     const toolCalls: ToolCall[] = [];

@@ -1,7 +1,12 @@
+export type BrainProviderName = 'openrouter' | 'deepseek';
+
 export type Config = {
-  openRouterApiKey: string;
+  brainProvider: BrainProviderName;
+  openRouterApiKey?: string;
   openRouterModel: string;
   openRouterFallbackModels: string[];
+  deepSeekApiKey?: string;
+  deepSeekModel: string;
   searchBackend: 'duckduckgo' | 'searxng';
   searxngUrl?: string;
   maxAgentSteps: number;
@@ -18,9 +23,19 @@ function intEnv(name: string, fallback: number): number {
 }
 
 export function loadConfig(): Config {
+  const brainProvider = (process.env.BRAIN_PROVIDER ?? 'openrouter').toLowerCase();
+  if (brainProvider !== 'openrouter' && brainProvider !== 'deepseek') {
+    throw new Error('BRAIN_PROVIDER must be openrouter or deepseek');
+  }
+
   const openRouterApiKey = process.env.OPENROUTER_API_KEY;
-  if (!openRouterApiKey) {
-    throw new Error('OPENROUTER_API_KEY is required. Copy .env.example to .env and add your OpenRouter API key.');
+  const deepSeekApiKey = process.env.DEEPSEEK_API_KEY;
+
+  if (brainProvider === 'openrouter' && !openRouterApiKey) {
+    throw new Error('OPENROUTER_API_KEY is required when BRAIN_PROVIDER=openrouter.');
+  }
+  if (brainProvider === 'deepseek' && !deepSeekApiKey) {
+    throw new Error('DEEPSEEK_API_KEY is required when BRAIN_PROVIDER=deepseek.');
   }
 
   const searchBackend = (process.env.SEARCH_BACKEND ?? 'duckduckgo').toLowerCase();
@@ -37,12 +52,15 @@ export function loadConfig(): Config {
     .filter(Boolean);
 
   return {
+    brainProvider,
     openRouterApiKey,
     openRouterModel: process.env.OPENROUTER_MODEL ?? 'deepseek/deepseek-v4.1-flash',
     openRouterFallbackModels: fallbackModels,
+    deepSeekApiKey,
+    deepSeekModel: process.env.DEEPSEEK_MODEL ?? 'deepseek-flash',
     searchBackend,
     searxngUrl: process.env.SEARXNG_URL,
-    maxAgentSteps: intEnv('MAX_AGENT_STEPS', 4),
+    maxAgentSteps: intEnv('MAX_AGENT_STEPS', 3),
     maxRequests: intEnv('MAX_REQUESTS', 40),
     requestTimeoutMs: intEnv('REQUEST_TIMEOUT_MS', 15000),
     brainMinIntervalMs: intEnv('BRAIN_MIN_INTERVAL_MS', 750),

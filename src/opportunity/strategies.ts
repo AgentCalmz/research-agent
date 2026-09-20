@@ -92,7 +92,8 @@ function extractWorkPreference(request: string): 'remote' | 'hybrid' | 'onsite' 
 
 function extractExcludeTerms(request: string): string[] {
   const match = request.match(/\b(?:exclude|avoid|without)\s+([^.!?]+)/i);
-  return match ? match[1].split(/,|\s+and\s+/i).map((v) => v.trim()).filter(Boolean).slice(0, 8) : [];
+  const value = match?.[1];
+  return value ? value.split(/,|\s+and\s+/i).map((v) => v.trim()).filter(Boolean).slice(0, 8) : [];
 }
 
 function extractLocation(request: string): string | undefined {
@@ -101,8 +102,9 @@ function extractLocation(request: string): string | undefined {
 }
 
 function extractRoles(request: string): string[] {
-  const match = request.match(/\b(?:for|as)\s+(.+?)(?:\s+in\s+|\s+around\s+|\s+near\s+|\.|$)/i);
-  const value = match?.[1];
+  const direct = request.match(/\b(?:for|as)\s+(.+?)(?:\s+in\s+|\s+around\s+|\s+near\s+|\.|$)/i)?.[1];
+  const jobType = request.match(/\b(?:find|get)\s+(?:\d+\s+)?(.+?)\s+(?:jobs?|roles?|positions?)\b/i)?.[1];
+  const value = direct || jobType;
   return value ? value.split(/\s+or\s+|\s*,\s*/i).map((v) => v.trim()).filter(Boolean).slice(0, 5) : [];
 }
 

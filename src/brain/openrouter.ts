@@ -68,7 +68,7 @@ export class OpenRouterBrain implements BrainProvider {
           parameters: tool.parameters
         }
       })),
-      tool_choice: 'auto'
+      tool_choice: input.tools.length > 0 ? 'required' : 'none'
     };
 
     if (this.fallbackModels.length > 0) body.models = this.fallbackModels;

@@ -325,46 +325,6 @@ async function verifyBusiness(candidate: CandidateRecord, plan: ResearchPlan, se
   };
 }
 
-function renderDeterministicResults(candidates: CandidateRecord[], mode: HuntMode, requestedCount: number): string {
-  const verified = candidates.filter((candidate) => isEligibleCandidate(candidate, mode)).slice(0, Math.min(requestedCount, 20));
-  if (!verified.length) {
-    return [
-      '## Result: insufficient verified evidence — objective not met',
-      '',
-      `No qualifying ${mode === 'jobs' ? 'job listings' : 'opportunities'} reached the verification threshold.`,
-      'The engine deliberately withheld weak candidates rather than presenting profiles, directories, or unsupported claims as opportunities.'
-    ].join('\n');
-  }
-
-  return [
-    `## Verified opportunities (${verified.length})`,
-    '',
-    ...verified.map((candidate, index) => {
-      const facts = candidate.facts;
-      const sourceUrls = [...new Set(candidate.sources.map((source) => source.url))].slice(0, 4);
-      const evidenceUrls = [...new Set(candidate.evidence.map((item) => item.source.url))].slice(0, 6);
-      const contacts = [facts.phones ? `Phones: ${facts.phones}` : '', facts.emails ? `Emails: ${facts.emails}` : ''].filter(Boolean);
-      return [
-        `### ${index + 1}. ${candidate.title || candidate.name}`,
-        candidate.kind === 'job' ? `Company: ${facts.company || 'Not verified'}` : `Business: ${candidate.name}`,
-        candidate.location ? `Location: ${candidate.location}` : '',
-        facts.postedAt ? `Posted: ${facts.postedAt}` : '',
-        `Opportunity score: ${candidate.score}/10`,
-        `Confidence: ${Math.round(candidate.confidence * 100)}%`,
-        contacts.join(' | '),
-        candidate.kind === 'job' ? `Application/source: ${candidate.sourceUrl}` : `Source: ${candidate.sourceUrl}`,
-        sourceUrls.length ? `Sources: ${sourceUrls.join(' | ')}` : '',
-        evidenceUrls.length ? `Evidence: ${evidenceUrls.join(' | ')}` : ''
-      ].filter(Boolean).join('\n');
-    })
-  ].join('\n\n');
-}
-
-function isEligibleCandidate(candidate: CandidateRecord, mode: HuntMode): boolean {
-  if (candidate.status !== 'verified' || candidate.confidence < 0.6) return false;
-  if (mode === 'business_website_gap') return candidate.facts.noIndependentWebsite === true && !candidate.facts.matchedWebsiteUrl;
-  return true;
-}
 function compactCandidate(candidate: CandidateRecord): string {
   return JSON.stringify({
     id: candidate.id,

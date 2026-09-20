@@ -1,6 +1,7 @@
 import 'dotenv/config';
 import { loadConfig } from './core/config.js';
 import { OpenRouterBrain } from './brain/openrouter.js';
+import { DeepSeekBrain } from './brain/deepseek.js';
 import { DuckDuckGoSearch, SearxngSearch } from './discovery/search.js';
 import { ResearchAgent } from './runtime/agent.js';
 import { registerBuiltinTools } from './runtime/builtin-tools.js';
@@ -28,19 +29,22 @@ try {
   registerBuiltinTools(registry);
   registerDiscoveryTools(registry, search, new OpportunityStore(config.dataDir));
 
-  const agent = new ResearchAgent(
-    new OpenRouterBrain(
-      config.openRouterApiKey,
-      config.openRouterModel,
-      config.openRouterFallbackModels,
-      config.brainMinIntervalMs,
-      config.brainMaxOutputTokens
-    ),
-    registry,
-    config.maxAgentSteps
-  );
+  const brain = config.brainProvider === 'deepseek'
+    ? new DeepSeekBrain(
+        config.deepSeekApiKey!,
+        config.deepSeekModel,
+        config.brainMinIntervalMs,
+        config.brainMaxOutputTokens
+      )
+    : new OpenRouterBrain(
+        config.openRouterApiKey!,
+        config.openRouterModel,
+        config.openRouterFallbackModels,
+        config.brainMinIntervalMs,
+        config.brainMaxOutputTokens
+      );
 
-  console.log(await agent.run(request));
+  console.log(await new ResearchAgent(brain, registry, config.maxAgentSteps).run(request));
 } catch (error) {
   console.error(error instanceof Error ? error.message : String(error));
   process.exit(1);

@@ -25,6 +25,25 @@ test('business strategy rejects generic listicle candidates', () => {
   assert.equal(result, null);
 });
 
+test('accepts a concrete business listing', () => {
+  const result = candidateFromResult(
+    { title: 'Food Hub Services - Abuja, Nigeria - Contact Number', url: 'https://www.businesslist.com.ng/company/254728/food-hub-services', source: 'duckduckgo', snippet: 'Food Hub Services based in Abuja, Nigeria established in 2015.' },
+    'business_website_gap',
+    'Abuja'
+  );
+  assert.equal(result?.name, 'Food Hub Services');
+});
+
+test('accepts a concrete HotNigerianJobs listing', () => {
+  const result = candidateFromResult(
+    { title: 'Full Stack Engineer (Node.js/TypeScript + React)', url: 'https://www.hotnigerianjobs.com/hotjobs/791524/full-stack-engineer-nodejstypescript-react-at-swift.html', source: 'duckduckgo', snippet: 'SwiftLink Global Services Limited is recruiting to fill the position of Full Stack Engineer.' },
+    'jobs',
+    'Abuja'
+  );
+  assert.equal(result?.kind, 'job');
+  assert.equal(result?.facts.company, 'SwiftLink Global Services Limited');
+});
+
 test('default plan keeps verification bounded', () => {
   const plan = defaultPlan('Find businesses in Abuja without websites');
   assert.equal(plan.verifyLimit <= 6, true);

@@ -106,12 +106,15 @@ function extractContacts(text: string): { phones: string[]; emails: string[] } {
   };
 }
 
-function extractCompany(title: string): string | undefined {
-  const titleMatch = title.match(/\b(?:at|@)\s+(.+)$/i);
-  if (titleMatch?.[1]) return titleMatch[1].trim();
+function extractCompany(text: string): string | undefined {
+  const direct = text.match(/\b(?:at|@)\s+([A-Z][A-Za-z0-9&.' -]{2,80}?)(?:\.|\s+is\s+|\s+to\s+)/i);
+  if (direct?.[1]) return direct[1].trim();
 
-  const snippetMatch = title.match(/(?:recruiting|recruitment|hiring|vacancy)[^.!?]{0,80}\b(?:at|for)\s+([A-Z][A-Za-z0-9&.' -]{2,80}?)(?:\.|\s+is\s+|\s+to\s+)/i);
-  return snippetMatch?.[1]?.trim();
+  const recruiting = text.match(/([A-Z][A-Za-z0-9&.' -]{2,80}?)\s+is\s+(?:recruiting|hiring)\b/i);
+  if (recruiting?.[1]) return recruiting[1].trim();
+
+  const position = text.match(/([A-Z][A-Za-z0-9&.' -]{2,80}?)\s+is\s+recruiting\s+to\s+fill\s+the\s+position/i);
+  return position?.[1]?.trim();
 }
 
 function extractDate(text: string): Date | undefined {

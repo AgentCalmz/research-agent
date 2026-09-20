@@ -34,7 +34,7 @@ const NOISE_PATTERNS = [
 export function detectMode(request: string): HuntMode {
   const text = normalizeText(request);
   if (/\b(job|jobs|job hunting|vacanc|career|internship|graduate trainee|recruit|hiring|role|position|employment)\b/i.test(text)) return 'jobs';
-  if (/\b(business|businesses|company|companies|salon|restaurant|hotel|shop|store|clinic|agency|without website|no website|website gap)\b/i.test(text)) {
+  if (/\b(business|businesses|company|companies|salon|salons|restaurant|restaurants|hotel|hotels|shop|shops|store|stores|clinic|clinics|agency|agencies|without website|no website|website gap)\b/i.test(text)) {
     return 'business_website_gap';
   }
   return 'general';

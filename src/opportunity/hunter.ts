@@ -131,13 +131,14 @@ function extractDate(text: string): Date | undefined {
   return undefined;
 }
 
-function scoreJob(candidate: CandidateRecord, sourceCount: number, fresh: boolean, hasApply: boolean): number {
+function scoreJob(candidate: CandidateRecord, sourceCount: number, fresh: boolean, hasApply: boolean, roleMatch: boolean): number {
   let score = 4;
   if (sourceCount >= 2) score += 1.5;
   if (fresh) score += 2;
   if (hasApply) score += 1;
   if (candidate.facts.company) score += 0.5;
   if (candidate.facts.location) score += 0.5;
+  if (roleMatch) score += 1;
   return Math.min(10, Number(score.toFixed(1)));
 }
 
@@ -149,8 +150,8 @@ async function verifyJob(candidate: CandidateRecord, plan: ResearchPlan, search:
   let combinedText = sources.map((result) => result.snippet || '').join(' ');
 
   const fetchTargets = sources
-    .filter((result) => !SOCIAL_HOSTS.has(hostOf(result.url)))
-    .slice(0, 2);
+.filter((result) => !SOCIAL_HOSTS.has(hostOf(result.url)))
+    .slice(0, 1);
 
   for (const result of fetchTargets) {
     try {
@@ -168,6 +169,10 @@ async function verifyJob(candidate: CandidateRecord, plan: ResearchPlan, search:
   const postedAt = extractDate(combinedText);
   const fresh = postedAt ? ((Date.now() - postedAt.getTime()) / 86400000 <= plan.freshnessDays) : false;
   const applySignal = /apply now|apply|submit (?:cv|resume)|careers portal/i.test(combinedText);
+  const roleText = [candidate.title || candidate.name, ...plan.roles].join(' ');
+  const roleTokens = plan.roles.flatMap((role) => normalizeText(role).split(' ').filter((token) => token.length >= 3));
+  const normalizedJob = normalizeText(candidate.title || candidate.name);
+  const roleMatch = roleTokens.length > 0 && roleTokens.filter((token) => normalizedJob.includes(token)).length / roleTokens.length >= 0.5;
   if (company) evidenceItems.push(evidence(candidate.sourceUrl, 'search', `Employer identified as ${company}.`, undefined, 0.8));
   if (fresh) evidenceItems.push(evidence(candidate.sourceUrl, 'search', `Posting appears within the requested ${plan.freshnessDays}-day freshness window.`, undefined, 0.8));
   if (applySignal) evidenceItems.push(evidence(candidate.sourceUrl, 'website', 'Page contains an application signal.', undefined, 0.75));
@@ -184,7 +189,7 @@ async function verifyJob(candidate: CandidateRecord, plan: ResearchPlan, search:
     evidence: evidenceItems,
     status: sources.length >= 2 ? 'verified' : 'uncertain',
     confidence: Math.min(1, 0.45 + Math.min(0.25, sources.length * 0.08) + (company ? 0.12 : 0) + (fresh ? 0.12 : 0)),
-    score: scoreJob(candidate, sources.length, fresh, applySignal)
+    score: scoreJob(candidate, sources.length, fresh, applySignal, roleMatch)
   };
 }
 

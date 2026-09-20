@@ -44,13 +44,18 @@ export function defaultPlan(request: string): ResearchPlan {
   const mode = detectMode(request);
   const location = extractLocation(request);
   const roles = mode === 'jobs' ? extractRoles(request) : [];
+  const skills = mode === 'jobs' ? extractSkills(request) : [];
   const categories = mode === 'business_website_gap' ? extractCategories(request) : [];
   return {
     mode,
     location,
     roles,
+    skills,
     categories,
-    queries: buildQueries({ mode, location, roles, categories }),
+    experienceLevel: extractExperienceLevel(request),
+    workPreference: extractWorkPreference(request),
+    excludeTerms: extractExcludeTerms(request),
+    queries: buildQueries({ mode, location, roles, skills, categories, workPreference: extractWorkPreference(request) }),
     candidateLimit: mode === 'jobs' ? 40 : 30,
     verifyLimit: mode === 'jobs' ? 8 : 6,
     sourceDomains: mode === 'jobs' ? JOB_SOURCES : BUSINESS_SOURCE_HINTS,
@@ -64,6 +69,29 @@ function extractRequestedCount(request: string): number {
   const match = request.match(/\b(?:find|get|return|give me|top)\s+(\d{1,3})\b/i);
   const count = Number(match?.[1] ?? 10);
   return Number.isFinite(count) ? Math.max(1, Math.min(100, Math.floor(count))) : 10;
+}
+
+function extractSkills(request: string): string[] {
+  const match = request.match(/\b(?:skills?|technology|stack|using)\s*[:\-]?\s*([^.!?]+)/i);
+  return match ? match[1].split(/,|\s+and\s+/i).map((v) => v.trim()).filter(Boolean).slice(0, 8) : [];
+}
+
+function extractExperienceLevel(request: string): string | undefined {
+  const match = request.match(/\b(entry[- ]level|junior|mid[- ]level|senior|lead|manager|director|executive|graduate|intern)\b/i);
+  return match?.[1]?.toLowerCase();
+}
+
+function extractWorkPreference(request: string): 'remote' | 'hybrid' | 'onsite' | 'any' {
+  const text = request.toLowerCase();
+  if (/\bremote\b/.test(text)) return 'remote';
+  if (/\bhybrid\b/.test(text)) return 'hybrid';
+  if (/\bonsite|on-site|office\b/.test(text)) return 'onsite';
+  return 'any';
+}
+
+function extractExcludeTerms(request: string): string[] {
+  const match = request.match(/\b(?:exclude|avoid|without)\s+([^.!?]+)/i);
+  return match ? match[1].split(/,|\s+and\s+/i).map((v) => v.trim()).filter(Boolean).slice(0, 8) : [];
 }
 
 function extractLocation(request: string): string | undefined {
@@ -84,14 +112,16 @@ function extractCategories(request: string): string[] {
   return categoryMatch ? [categoryMatch[1].trim()] : [];
 }
 
-export function buildQueries(input: { mode: HuntMode; location?: string; roles?: string[]; categories?: string[] }): string[] {
+export function buildQueries(input: { mode: HuntMode; location?: string; roles?: string[]; skills?: string[]; categories?: string[]; workPreference?: 'remote' | 'hybrid' | 'onsite' | 'any' }): string[] {
   const location = input.location?.trim() || 'Nigeria';
   if (input.mode === 'jobs') {
     const roleTerms = input.roles?.length ? input.roles : ['jobs'];
+    const skillHint = input.skills?.length ? input.skills.join(' ') : '';
+    const preference = input.workPreference && input.workPreference !== 'any' ? input.workPreference : '';
     return [...new Set(roleTerms.flatMap((role) => [
-      `${role} ${location}`,
-      `${role} hiring ${location}`,
-      `${role} ${location} apply`,
+      `${role} ${skillHint} ${preference} ${location}`.replace(/\s+/g, ' ').trim(),
+      `${role} ${skillHint} hiring ${preference} ${location}`.replace(/\s+/g, ' ').trim(),
+      `${role} ${skillHint} ${location} apply`,
       `site:linkedin.com/jobs ${role} ${location}`,
       `site:jobberman.com ${role} ${location}`,
       `site:hotnigerianjobs.com ${role} ${location}`,

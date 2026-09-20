@@ -6,7 +6,9 @@ import {
   isJobIndexUrl,
   isBusinessIndexUrl,
   isSocialUrl,
-  isEditorialUrl
+  isEditorialUrl,
+  isLikelyJobListing,
+  isSearchNoise
 } from '../dist/opportunity/source-policy.js';
 import { candidateFromResult } from '../dist/opportunity/strategies.js';
 
@@ -29,4 +31,15 @@ test('rejects business directory/editorial pages as businesses', () => {
 
 test('recognizes concrete social profiles as social sources', () => {
   assert.equal(isSocialUrl('https://www.instagram.com/examplebusiness/'), true);
+});
+
+test('rejects current observed generic business result pages', () => {
+  assert.equal(isEditorialUrl('https://sabiabuja.com/10-trendy-restaurants-cafes-to-visit-in-abuja-2026'), true);
+  assert.equal(isEditorialUrl('https://www.whatsoninabuja.com/eat-drink'), true);
+  assert.equal(isSearchNoise('10 Trendy Restaurants & Cafes to Visit in Abuja (2026)'), true);
+  assert.equal(isSearchNoise('Find Best Restaurants in Abuja - Eat and Drink in Abuja'), true);
+});
+
+test('rejects current observed job index result', () => {
+  assert.equal(isLikelyJobListing('https://arc.dev/en-ng/remote-jobs', 'Remote Jobs in Nigeria (September 2026) - Arc', 'Remote jobs in Nigeria. Sign up for similar job alerts.'), false);
 });

@@ -134,7 +134,8 @@ export function candidateFromResult(result: SearchResult, mode: HuntMode, locati
     sources: [result],
     facts: {
       sourceHost: host,
-      sourceType: result.source
+      sourceType: result.source,
+      company: kind === 'job' ? extractJobCompany(cleanTitle) : undefined
     }
   };
 }

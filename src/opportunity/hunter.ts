@@ -9,7 +9,7 @@ import type { CandidateRecord, HuntMode, ResearchPlan } from './types.js';
 
 const MAX_DISCOVERY_RESULTS_PER_QUERY = 8;
 const SOCIAL_HOSTS = new Set(['instagram.com', 'facebook.com', 'linkedin.com', 'tiktok.com', 'x.com']);
-const DIRECTORY_HINTS = /directory|yellowpages|businesslist|foursquare|tripadvisor|yelp|mapquest/i;
+const DIRECTORY_HINTS = /directory|yellowpages|businesslist|foursquare|tripadvisor|yelp|mapquest|geoleads/i;
 
 function evidence(url: string, sourceType: Evidence['source']['sourceType'], claim: string, excerpt?: string, confidence?: number): Evidence {
   return {
@@ -146,7 +146,7 @@ async function verifyJob(candidate: CandidateRecord, plan: ResearchPlan, search:
   const results = await parallelSearch(search, [query, `"${candidate.name}" ${plan.location || ''} apply`], 4);
   const sources = uniqueResults([...candidate.sources, ...results]);
   const evidenceItems = [...candidate.evidence];
-  let combinedText = '';
+  let combinedText = sources.map((result) => result.snippet || '').join(' ');
 
   const fetchTargets = sources
     .filter((result) => !SOCIAL_HOSTS.has(hostOf(result.url)))
@@ -204,12 +204,14 @@ async function verifyBusiness(candidate: CandidateRecord, plan: ResearchPlan, se
   let independentCandidateUrls: string[] = [];
   let publicContact = false;
   let matchedWebsiteUrl: string | undefined;
-  let combinedText = '';
+  let combinedText = sources.map((result) => result.snippet || '').join(' ');
 
   for (const result of sources.slice(0, 10)) {
+    const genericPage = /top\s+\d+|best\s+\d+|without websites|businesses without websites|directory|category|list of/i.test(result.title || '') ||
+      /without websites|directory|category|list of/i.test(result.snippet || '');
     const kind = sourceKind(result.url);
     if (kind === 'social') socialUrls.push(result.url);
-    if (!looksLikeIndependentWebsite(result.url)) continue;
+    if (genericPage || !looksLikeIndependentWebsite(result.url)) continue;
     independentCandidateUrls.push(result.url);
     try {
       const response = await fetchText(result.url);

@@ -454,6 +454,193 @@ function sanitizePlan(request: string, args: Record<string, unknown>): ResearchP
   };
 }
 
+const MAX_RESEARCH_ROUNDS = 5;
+const MAX_NO_PROGRESS_ROUNDS = 2;
+
+function candidateKey(candidate: CandidateRecord): string {
+  return [
+    candidate.kind,
+    normalizeText(candidate.name),
+    normalizeText(String(candidate.facts.company || '')),
+    normalizeText(candidate.location || '')
+  ].join('|');
+}
+
+function fallbackResearchQueries(plan: ResearchPlan, round: number): string[] {
+  const location = plan.location || 'Nigeria';
+  if (plan.mode === 'jobs') {
+    const roles = plan.roles.length ? plan.roles : ['software engineer', 'developer', 'engineering'];
+    const role = roles[round % roles.length];
+    const preference = plan.workPreference && plan.workPreference !== 'any' ? plan.workPreference : '';
+    const sourceQueries = [
+      `site:jobberman.com/listings ${role} ${location}`,
+      `site:hotnigerianjobs.com/hotjobs ${role} ${location}`,
+      `site:myjobmag.com/job ${role} ${location}`,
+      `site:linkedin.com/jobs/view ${role} ${location}`,
+      `site:ng.indeed.com/viewjob ${role} ${location}`,
+      `site:jobs.leep.gov.ng ${role} ${location}`
+    ];
+    if (round === 0) return sourceQueries;
+    if (round === 1) return [
+      `${role} ${preference} hiring ${location}`.replace(/\s+/g, ' ').trim(),
+      `${role} ${location} vacancy apply`,
+      `${role} ${location} recruiter company`
+    ];
+    if (round === 2) return [
+      `\"${role}\" ${location} \"apply now\"`,
+      `\"${role}\" ${location} requirements employer`,
+      `\"${role}\" ${location} \"job description\"`
+    ];
+    return [
+      `site:jobberman.com/listings ${role} Nigeria`,
+      `site:hotnigerianjobs.com/hotjobs ${role} Nigeria`,
+      `site:myjobmag.com/job ${role} Nigeria`
+    ];
+  }
+
+  if (plan.mode === 'business_website_gap') {
+    const category = plan.categories.length ? plan.categories.join(' ') : 'businesses';
+    if (round === 0) return [
+      `${category} ${location} directory phone`,
+      `site:businesslist.com.ng/company ${category} ${location}`,
+      `site:finelib.com ${category} ${location}`,
+      `site:instagram.com ${category} ${location}`,
+      `site:facebook.com ${category} ${location}`
+    ];
+    if (round === 1) return [
+      `${category} ${location} contact phone address`,
+      `\"${category}\" \"${location}\" Instagram`,
+      `\"${category}\" \"${location}\" Facebook`,
+      `\"${category}\" \"${location}\" official website`
+    ];
+    if (round === 2) return [
+      `${category} ${location} WhatsApp phone`,
+      `${category} ${location} Google business social`,
+      `site:businesslist.com.ng/company ${category} ${location} phone`
+    ];
+    return [
+      `${category} ${location} local business contact`,
+      `${category} ${location} social media phone`
+    ];
+  }
+
+  return buildQueries({
+    mode: plan.mode,
+    location: plan.location,
+    roles: plan.roles,
+    skills: plan.skills,
+    categories: plan.categories,
+    workPreference: plan.workPreference
+  });
+}
+
+function replaceCandidates(target: CandidateRecord[], updates: CandidateRecord[]): CandidateRecord[] {
+  const byId = new Map(updates.map((candidate) => [candidate.id, candidate]));
+  return target.map((candidate) => byId.get(candidate.id) || candidate);
+}
+
+function reasonForToCheck(candidate: CandidateRecord, mode: HuntMode): string {
+  if (mode === 'business_website_gap') {
+    if (candidate.facts.matchedWebsiteUrl) return 'An independent website was found, so the no-website claim was not established.';
+    if (candidate.status === 'uncertain' && candidate.facts.socialOnly) return 'Social presence was found, but non-social corroboration is not strong enough yet.';
+    if (candidate.facts.candidateWebsiteUrls) return 'A possible website signal was found but could not be confidently matched or reached.';
+    if (!candidate.facts.publicContact) return 'A public contact point is still missing.';
+    return 'Candidate identity or website-gap evidence is incomplete.';
+  }
+
+  const missing: string[] = [];
+  if (!candidate.facts.company) missing.push('employer');
+  if (!candidate.facts.postedAt) missing.push('freshness');
+  if (!candidate.facts.hasApply) missing.push('application path');
+  if (candidate.status === 'uncertain' && missing.length) return `Still need verified ${missing.join(', ')} evidence.`;
+  return 'Candidate looks relevant but has not yet crossed the verification threshold.';
+}
+
+function renderDeterministicResults(
+  candidates: CandidateRecord[],
+  mode: HuntMode,
+  requestedCount: number,
+  rounds: number,
+  exhaustedReason: string
+): string {
+  const verified = candidates
+    .filter((candidate) => isEligibleCandidate(candidate, mode))
+    .sort((a, b) => (b.score * b.confidence) - (a.score * a.confidence))
+    .slice(0, Math.min(requestedCount, 20));
+  const toCheck = candidates
+    .filter((candidate) => candidate.status === 'uncertain' && candidate.confidence >= 0.35)
+    .sort((a, b) => (b.score * b.confidence) - (a.score * a.confidence))
+    .slice(0, 8);
+
+  const lines = [
+    '## Research result',
+    '',
+    `Strong opportunities found: ${verified.length}/${requestedCount}.`,
+    `Research rounds completed: ${rounds}.`,
+    `Research status: ${exhaustedReason}.`,
+    ''
+  ];
+
+  if (verified.length) {
+    lines.push(
+      '## Verified opportunities',
+      '',
+      ...verified.map((candidate, index) => renderCandidate(candidate, index + 1, mode)),
+      ''
+    );
+  }
+
+  if (toCheck.length) {
+    lines.push(
+      '## To check',
+      '',
+      'These are credible near-misses retained for manual follow-up; they are not presented as verified opportunities.',
+      '',
+      ...toCheck.map((candidate, index) => renderToCheck(candidate, index + 1, mode))
+    );
+  }
+
+  if (!verified.length && !toCheck.length) {
+    lines.push('No credible candidates survived the discovery filters.');
+  }
+
+  return lines.join('\n');
+}
+
+function renderCandidate(candidate: CandidateRecord, index: number, mode: HuntMode): string {
+  const facts = candidate.facts;
+  const sourceUrls = [...new Set(candidate.sources.map((source) => source.url))].slice(0, 5);
+  const evidenceUrls = [...new Set(candidate.evidence.map((item) => item.source.url))].slice(0, 6);
+  const contacts = [facts.phones ? `Phones: ${facts.phones}` : '', facts.emails ? `Emails: ${facts.emails}` : ''].filter(Boolean);
+  return [
+    `### ${index}. ${candidate.title || candidate.name}`,
+    mode === 'jobs' ? `Company: ${facts.company || 'Not verified'}` : `Business: ${candidate.name}`,
+    candidate.location ? `Location: ${candidate.location}` : '',
+    mode === 'jobs' ? `Freshness: ${facts.postedAt ? 'date identified' : 'not verified'}` : '',
+    mode === 'jobs' ? `Fit signals: role=${facts.roleMatch ? 'match' : 'unknown'}, skills=${facts.skillsMatch ? 'match' : 'unknown'}, preference=${facts.preferenceMatch ? 'match' : 'unknown'}, experience=${facts.experienceMatch ? 'match' : 'unknown'}` : '',
+    `Opportunity score: ${candidate.score}/10`,
+    `Confidence: ${Math.round(candidate.confidence * 100)}%`,
+    contacts.join(' | '),
+    mode === 'jobs' ? `Application/source: ${candidate.sourceUrl}` : `Source: ${candidate.sourceUrl}`,
+    sourceUrls.length ? `Sources: ${sourceUrls.join(' | ')}` : '',
+    evidenceUrls.length ? `Evidence: ${evidenceUrls.join(' | ')}` : ''
+  ].filter(Boolean).join('\n');
+}
+
+function renderToCheck(candidate: CandidateRecord, index: number, mode: HuntMode): string {
+  const sourceUrls = [...new Set(candidate.sources.map((source) => source.url))].slice(0, 4);
+  return [
+    `### ${index}. ${candidate.title || candidate.name}`,
+    mode === 'jobs' ? `Company: ${candidate.facts.company || 'Not verified'}` : `Business: ${candidate.name}`,
+    candidate.location ? `Location: ${candidate.location}` : '',
+    `Reason: ${reasonForToCheck(candidate, mode)}`,
+    `Opportunity score: ${candidate.score}/10`,
+    `Confidence: ${Math.round(candidate.confidence * 100)}%`,
+    `Source: ${candidate.sourceUrl}`,
+    sourceUrls.length ? `Other sources: ${sourceUrls.join(' | ')}` : ''
+  ].filter(Boolean).join('\n');
+}
+
 export class OpportunityHunter {
   constructor(
     private readonly brain: BrainProvider,
@@ -468,78 +655,112 @@ export class OpportunityHunter {
       tools: [PLAN_TOOL]
     });
 
-    const planArgs = planResponse?.toolCalls[0]?.arguments ?? {};
-    const plan = sanitizePlan(request, planArgs);
-    const discovery = await parallelSearch(this.search, plan.queries, MAX_DISCOVERY_RESULTS_PER_QUERY);
-    let candidates = mergeCandidates(discovery, plan.mode, plan.location).slice(0, plan.candidateLimit);
+    const plan = sanitizePlan(request, planResponse?.toolCalls[0]?.arguments ?? {});
+    let candidates: CandidateRecord[] = [];
+    let queryQueue = [...new Set([...plan.queries, ...fallbackResearchQueries(plan, 0)])];
+    const searchedQueries = new Set<string>();
+    let noProgressRounds = 0;
+    let refineUsed = false;
+    let rounds = 0;
+    let exhaustedReason = 'target reached';
 
-    if (!candidates.length) {
-      return `No viable candidates were discovered for this objective. Strategy used: ${plan.mode}.`;
-    }
+    for (let round = 0; round < MAX_RESEARCH_ROUNDS; round += 1) {
+      rounds = round + 1;
+      const remainingQueries = queryQueue.filter((query) => !searchedQueries.has(query)).slice(0, round === 0 ? 8 : 5);
+      if (!remainingQueries.length) {
+        const next = fallbackResearchQueries(plan, round);
+        for (const query of next) if (!searchedQueries.has(query)) queryQueue.push(query);
+      }
 
+      const activeQueries = queryQueue.filter((query) => !searchedQueries.has(query)).slice(0, round === 0 ? 8 : 5);
+      for (const query of activeQueries) searchedQueries.add(query);
 
-    const toVerify = candidates.slice(0, Math.min(plan.verifyLimit, candidates.length));
-    let verified = await Promise.all(toVerify.map((candidate) =>
-      plan.mode === 'jobs'
-        ? verifyJob(candidate, plan, this.search)
-        : plan.mode === 'business_website_gap'
-          ? verifyBusiness(candidate, plan, this.search)
-          : verifyJob(candidate, plan, this.search)
-    ));
+      const beforeCount = candidates.length;
+      if (activeQueries.length) {
+        const discovery = await parallelSearch(this.search, activeQueries, MAX_DISCOVERY_RESULTS_PER_QUERY);
+        const discovered = mergeCandidates(discovery, plan.mode, plan.location);
+        const existingKeys = new Set(candidates.map(candidateKey));
+        const freshCandidates = discovered.filter((candidate) => !existingKeys.has(candidateKey(candidate)));
+        candidates = [...candidates, ...freshCandidates].slice(0, plan.candidateLimit);
+      }
 
-    candidates = [...verified, ...candidates.slice(toVerify.length)]
-      .sort((a, b) => (b.score * b.confidence) - (a.score * a.confidence));
+      const eligibleBeforeVerify = candidates.filter((candidate) => isEligibleCandidate(candidate, plan.mode)).length;
+      if (eligibleBeforeVerify >= plan.requestedCount) {
+        exhaustedReason = 'requested target reached';
+        break;
+      }
 
-    const strongTarget = Math.min(plan.requestedCount, 3);
-    const strongCount = verified.filter((candidate) => isEligibleCandidate(candidate, plan.mode) && candidate.score >= 5).length;
+      const verificationBatchLimit = plan.mode === 'jobs' ? 5 : 4;
+      const toVerify = candidates
+        .filter((candidate) => candidate.status === 'discovered' || candidate.status === 'uncertain')
+        .sort((a, b) => (b.score * b.confidence) - (a.score * a.confidence))
+        .slice(0, verificationBatchLimit);
 
-    if (strongCount < strongTarget && getRequestCount() < 32) {
-      const refineResponse = await brainCompleteWithRetry(this.brain, {
-        system: 'The first local discovery pass was weak. Request at most three genuinely different discovery queries. Do not repeat previous query wording.',
-        user: [
-          `Objective: ${request}`,
-          `Mode: ${plan.mode}`,
-          `Location: ${plan.location || '(not specified)'}`,
-          'Already found candidate names:',
-          candidates.slice(0, 8).map((candidate) => candidate.name).join(', ')
-        ].join('\\n'),
-        tools: [REFINE_TOOL]
-      });
-      const refineQueries = Array.isArray(refineResponse?.toolCalls[0]?.arguments?.queries)
-        ? refineResponse.toolCalls[0]!.arguments.queries.filter((value): value is string => typeof value === 'string').slice(0, 3)
-        : [];
-      if (refineQueries.length) {
-        const extraResults = await parallelSearch(this.search, refineQueries, 6);
-        const existingKeys = new Set(candidates.map((candidate) => `${candidate.kind}|${normalizeText(candidate.name)}|${normalizeText(String(candidate.facts.company || ''))}|${normalizeText(candidate.location || '')}`));
-        const newCandidates = mergeCandidates(extraResults, plan.mode, plan.location)
-          .filter((candidate) => !existingKeys.has(`${candidate.kind}|${normalizeText(candidate.name)}|${normalizeText(String(candidate.facts.company || ''))}|${normalizeText(candidate.location || '')}`))
-          .slice(0, 2);
-        const extraVerified = await Promise.all(newCandidates.map((candidate) =>
+      if (toVerify.length) {
+        const updates = await Promise.all(toVerify.map((candidate) =>
           plan.mode === 'jobs'
             ? verifyJob(candidate, plan, this.search)
-            : verifyBusiness(candidate, plan, this.search)
+            : plan.mode === 'business_website_gap'
+              ? verifyBusiness(candidate, plan, this.search)
+              : verifyJob(candidate, plan, this.search)
         ));
-        verified = [...verified, ...extraVerified];
-        candidates = [...verified, ...candidates.slice(toVerify.length), ...newCandidates.filter((candidate) => !extraVerified.some((item) => item.id === candidate.id))]
-          .sort((a, b) => (b.score * b.confidence) - (a.score * a.confidence));
+        candidates = replaceCandidates(candidates, updates);
+      }
+
+      const strongCount = candidates.filter((candidate) => isEligibleCandidate(candidate, plan.mode)).length;
+      if (strongCount >= plan.requestedCount) {
+        exhaustedReason = 'requested target reached';
+        break;
+      }
+
+      const gainedCandidates = candidates.length - beforeCount;
+      const gainedEvidence = toVerify.length > 0;
+      if (gainedCandidates === 0 && !gainedEvidence) noProgressRounds += 1;
+      else noProgressRounds = 0;
+
+      if (!refineUsed && strongCount < Math.min(plan.requestedCount, 3) && getRequestCount() < 60) {
+        refineUsed = true;
+        const refineResponse = await brainCompleteWithRetry(this.brain, {
+          system: 'The local research pass is incomplete. Request at most three genuinely different discovery queries. Do not repeat previous wording or return generic advice.',
+          user: [
+            `Objective: ${request}`,
+            `Mode: ${plan.mode}`,
+            `Location: ${plan.location || '(not specified)'}`,
+            `Already found: ${candidates.slice(0, 10).map((candidate) => candidate.name).join(', ') || '(none)'}`
+          ].join('\n'),
+          tools: [REFINE_TOOL]
+        });
+        const refined = Array.isArray(refineResponse?.toolCalls[0]?.arguments?.queries)
+          ? refineResponse.toolCalls[0]!.arguments.queries.filter((value): value is string => typeof value === 'string').slice(0, 3)
+          : [];
+        queryQueue.push(...refined);
+      }
+
+      if (noProgressRounds >= MAX_NO_PROGRESS_ROUNDS) {
+        exhaustedReason = 'no new credible evidence found after repeated research rounds';
+        break;
+      }
+      if (getRequestCount() >= 72) {
+        exhaustedReason = 'HTTP research budget reached';
+        break;
       }
     }
 
-    const eligibleCandidates = candidates.filter((candidate) => isEligibleCandidate(candidate, plan.mode));
-    if (!eligibleCandidates.length) {
-      return renderDeterministicResults(candidates, plan.mode, plan.requestedCount);
+    if (rounds >= MAX_RESEARCH_ROUNDS && candidates.filter((candidate) => isEligibleCandidate(candidate, plan.mode)).length < plan.requestedCount) {
+      exhaustedReason = 'research round limit reached';
     }
 
+    candidates.sort((a, b) => (b.score * b.confidence) - (a.score * a.confidence));
+    const eligibleCandidates = candidates.filter((candidate) => isEligibleCandidate(candidate, plan.mode));
+
     const opportunities: Opportunity[] = eligibleCandidates
-      .slice(0, Math.min(20, candidates.length))
+      .slice(0, Math.min(plan.requestedCount, 20))
       .map((candidate) => ({
         id: candidate.id,
         title: candidate.title || candidate.name,
         description: candidate.kind === 'job'
           ? `Job opportunity at ${candidate.facts.company || 'an identified employer'}.`
-          : candidate.facts.noIndependentWebsite
-            ? 'Potential website/digital-presence opportunity supported by public evidence.'
-            : 'Potential business opportunity supported by public evidence.',
+          : 'Potential website/digital-presence opportunity supported by public evidence.',
         score: candidate.score,
         entities: {
           name: candidate.name,
@@ -550,18 +771,23 @@ export class OpportunityHunter {
         evidence: candidate.evidence.slice(-10)
       }));
 
-    await Promise.all(opportunities.slice(0, Math.min(plan.requestedCount, 20)).map((opportunity) => this.store.save(opportunity)));
+    await Promise.all(opportunities.map((opportunity) => this.store.save(opportunity)));
 
-    const envelopeLimit = Math.min(20, Math.max(8, plan.requestedCount * 2));
-    const evidenceEnvelope = eligibleCandidates.slice(0, envelopeLimit).map(compactCandidate).join('\n');
+    if (!candidates.length) {
+      return renderDeterministicResults(candidates, plan.mode, plan.requestedCount, rounds, exhaustedReason === 'target reached' ? 'no viable candidates discovered' : exhaustedReason);
+    }
+
+    const toCheck = candidates.filter((candidate) => candidate.status === 'uncertain' && candidate.confidence >= 0.35).slice(0, 8);
+    const envelopeCandidates = [...eligibleCandidates.slice(0, plan.requestedCount), ...toCheck].slice(0, 16);
+    const evidenceEnvelope = envelopeCandidates.map(compactCandidate).join('\n');
     const finalResponse = await brainCompleteWithRetry(this.brain, {
-      system: `You are the final decision and synthesis brain. Do not invent missing facts. Use only the compact evidence envelope supplied below. Return at most ${plan.requestedCount} opportunities. Prefer verified candidates; clearly label any uncertain candidate instead of presenting it as verified. For jobs, include employer, location, freshness, fit signals, and application/source URLs when present. For business website-gap opportunities, explain why the evidence supports the digital gap and list public contact/source URLs.\n\nEvidence envelope:\n${evidenceEnvelope}`,
+      system: `You are the final synthesis brain. Use only the supplied evidence envelope. Never invent facts. The research engine has already enforced objective-specific verification. Return up to ${plan.requestedCount} verified opportunities when available. If fewer than requested were verified, explicitly keep the remaining credible near-misses in a separate 'To check' section; never promote them to verified. Include direct URLs and public contacts only when present in evidence.\n\nEvidence envelope:\n${evidenceEnvelope}` ,
       user: request,
       tools: []
     });
 
     const synthesized = finalResponse?.text?.trim();
     if (synthesized && !/^\s*[{[]\"?id/i.test(synthesized)) return synthesized;
-    return renderDeterministicResults(candidates, plan.mode, plan.requestedCount);
+    return renderDeterministicResults(candidates, plan.mode, plan.requestedCount, rounds, exhaustedReason);
   }
 }

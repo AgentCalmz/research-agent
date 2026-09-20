@@ -113,7 +113,7 @@ function extractCategories(request: string): string[] {
   const match = request.match(/\b(?:businesses|companies|shops|stores|restaurants|salons|hotels|clinics|agencies)\s+(?:in|around|near)\s+/i);
   if (!match) return [];
   const before = request.slice(0, match.index ?? 0);
-  const categoryMatch = before.match(/(?:find|discover|list)\s+(.+?)\s+(?:businesses|companies|shops|stores|restaurants|salons|hotels|clinics|agencies)$/i);
+  const categoryMatch = before.match(/(?:find|discover|list)\s+(?:\d+\s+)?(.+?)\s+(?:businesses|companies|shops|stores|restaurants|salons|hotels|clinics|agencies)$/i);
   const value = categoryMatch?.[1];
   return value ? [value.trim()] : [];
 }

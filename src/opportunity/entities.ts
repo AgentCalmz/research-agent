@@ -42,9 +42,13 @@ export function sameEntity(a: { name: string; location?: string; phone?: string 
 export function canonicalizeUrl(url: string): string {
   try {
     const parsed = new URL(url);
+    const redirected = parsed.searchParams.get('uddg');
+    if ((parsed.hostname === 'duckduckgo.com' || parsed.hostname.endsWith('.duckduckgo.com')) && redirected) {
+      return canonicalizeUrl(decodeURIComponent(redirected));
+    }
     parsed.hash = '';
     for (const key of [...parsed.searchParams.keys()]) {
-      if (/^(utm_|fbclid|gclid|ref|source)/i.test(key)) parsed.searchParams.delete(key);
+      if (/^(utm_|fbclid|gclid|ref|source|rut)$/i.test(key)) parsed.searchParams.delete(key);
     }
     return parsed.toString().replace(/\/$/, '');
   } catch {

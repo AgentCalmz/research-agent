@@ -285,19 +285,22 @@ async function verifyBusiness(candidate: CandidateRecord, plan: ResearchPlan, se
     if (matchedWebsiteUrl) break;
   }
 
-  const independentSources = new Set(sources.map((result) => hostOf(result.url)).filter(Boolean)).size;
+  const sourceHosts = new Set(sources.map((result) => hostOf(result.url)).filter(Boolean));
+  const socialHosts = new Set(socialUrls.map((url) => hostOf(url)).filter(Boolean));
+  const nonSocialSourceHosts = new Set([...sourceHosts].filter((host) => !SOCIAL_HOSTS.has(host) && !/duckduckgo\\.|google\\.|bing\\./i.test(host)));
   const socialOnly = socialUrls.length > 0 && !reachableIndependent;
-  const noIndependentWebsite = !reachableIndependent && socialOnly && independentSources >= 2;
+  const noIndependentWebsite = !reachableIndependent && socialOnly &&
+    (nonSocialSourceHosts.size >= 1 || (socialHosts.size >= 2 && publicContact));
 
   if (socialOnly) evidenceItems.push(evidence(socialUrls[0]!, 'social', 'Public social presence discovered while no matching independent site was verified.', undefined, 0.75));
   if (publicContact) evidenceItems.push(evidence(candidate.sourceUrl, 'directory', 'Public contact information was found during local verification.', undefined, 0.75));
-  if (independentSources >= 2) evidenceItems.push(evidence(candidate.sourceUrl, 'search', 'Candidate is supported by multiple independent source hosts.', undefined, 0.8));
+  if (nonSocialSourceHosts.size >= 1) evidenceItems.push(evidence(candidate.sourceUrl, 'search', 'Candidate is corroborated by at least one non-social public source.', undefined, 0.8));
 
   const score = Math.min(10, Number((
     (noIndependentWebsite ? 4 : 0) +
     (socialOnly ? 2 : 0) +
     (publicContact ? 1.5 : 0) +
-    (independentSources >= 2 ? 1.5 : 0) +
+    (nonSocialSourceHosts.size >= 1 ? 1.5 : 0) +
     Math.min(1, nameMatch(name, combinedText))
   ).toFixed(1)));
 

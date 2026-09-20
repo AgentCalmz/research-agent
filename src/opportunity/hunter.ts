@@ -295,11 +295,15 @@ const PLAN_TOOL = {
       mode: { type: 'string', enum: ['jobs', 'business_website_gap', 'general'] },
       location: { type: 'string' },
       roles: { type: 'array', items: { type: 'string' }, maxItems: 5 },
+      skills: { type: 'array', items: { type: 'string' }, maxItems: 8 },
       categories: { type: 'array', items: { type: 'string' }, maxItems: 5 },
       candidate_limit: { type: 'integer', minimum: 10, maximum: 60 },
       verify_limit: { type: 'integer', minimum: 4, maximum: 20 },
       freshness_days: { type: 'integer', minimum: 1, maximum: 3650 },
       verification_depth: { type: 'string', enum: ['quick', 'standard', 'deep'] },
+      experience_level: { type: 'string' },
+      work_preference: { type: 'string', enum: ['remote', 'hybrid', 'onsite', 'any'] },
+      exclude_terms: { type: 'array', items: { type: 'string' }, maxItems: 8 },
       requested_count: { type: 'integer', minimum: 1, maximum: 100 }
     },
     required: ['mode']
@@ -323,6 +327,7 @@ function sanitizePlan(request: string, args: Record<string, unknown>): ResearchP
   const mode = args.mode === 'jobs' || args.mode === 'business_website_gap' || args.mode === 'general' ? args.mode : fallback.mode;
   const location = typeof args.location === 'string' && args.location.trim() ? args.location.trim() : fallback.location;
   const roles = Array.isArray(args.roles) ? args.roles.filter((v): v is string => typeof v === 'string').slice(0, 5) : fallback.roles;
+  const skills = Array.isArray(args.skills) ? args.skills.filter((v): v is string => typeof v === 'string').slice(0, 8) : fallback.skills;
   const categories = Array.isArray(args.categories) ? args.categories.filter((v): v is string => typeof v === 'string').slice(0, 5) : fallback.categories;
   const freshnessDays = Number(args.freshness_days);
   const candidateLimit = Number(args.candidate_limit);
@@ -330,14 +335,21 @@ function sanitizePlan(request: string, args: Record<string, unknown>): ResearchP
   const verificationDepth = args.verification_depth === 'quick' || args.verification_depth === 'deep' || args.verification_depth === 'standard'
     ? args.verification_depth
     : fallback.verificationDepth;
+  const experienceLevel = typeof args.experience_level === 'string' && args.experience_level.trim() ? args.experience_level.trim().toLowerCase() : fallback.experienceLevel;
+  const workPreference = args.work_preference === 'remote' || args.work_preference === 'hybrid' || args.work_preference === 'onsite' || args.work_preference === 'any' ? args.work_preference : fallback.workPreference;
+  const excludeTerms = Array.isArray(args.exclude_terms) ? args.exclude_terms.filter((v): v is string => typeof v === 'string').slice(0, 8) : fallback.excludeTerms;
   const requestedCount = Number(args.requested_count);
   const safeVerifyLimit = mode === 'jobs' ? 8 : 6;
   return {
     mode,
     location,
     roles,
+    skills,
     categories,
-    queries: buildQueries({ mode, location, roles, categories }).slice(0, mode === 'jobs' ? 6 : 6),
+    experienceLevel,
+    workPreference,
+    excludeTerms,
+    queries: buildQueries({ mode, location, roles, skills, categories, workPreference }).slice(0, 6),
     candidateLimit: Number.isFinite(candidateLimit) ? Math.max(10, Math.min(60, Math.floor(candidateLimit))) : fallback.candidateLimit,
     verifyLimit: Number.isFinite(verifyLimit) ? Math.max(4, Math.min(safeVerifyLimit, Math.floor(verifyLimit))) : fallback.verifyLimit,
     sourceDomains: fallback.sourceDomains,

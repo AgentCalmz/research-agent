@@ -110,13 +110,12 @@ function extractRoles(request: string): string[] {
 }
 
 function extractCategories(request: string): string[] {
-  const match = request.match(/\b(?:businesses|companies|shops|stores|restaurants|salons|hotels|clinics|agencies)\s+(?:in|around|near)\s+/i);
-  if (!match) return [];
-  const before = request.slice(0, match.index ?? 0);
-  const categoryMatch = before.match(/(?:find|discover|list)\s+(?:\d+\s+)?(.+?)\s+(?:businesses|companies|shops|stores|restaurants|salons|hotels|clinics|agencies)$/i);
-  const value = categoryMatch?.[1];
-  return value ? [value.trim()] : [];
+  const match = request.match(/\b(?:find|discover|list)\s+(?:\d+\s+)?(?:(.+?)\s+)?(businesses|companies|shops|stores|restaurants|salons|hotels|clinics|agencies)\s+(?:in|around|near)\b/i);
+  if (!match?.[2]) return [];
+  const modifier = match[1]?.trim();
+  return [modifier ? `${modifier} ${match[2]}` : match[2]];
 }
+
 
 export function buildQueries(input: { mode: HuntMode; location?: string; roles?: string[]; skills?: string[]; categories?: string[]; workPreference?: 'remote' | 'hybrid' | 'onsite' | 'any' }): string[] {
   const location = input.location?.trim() || 'Nigeria';

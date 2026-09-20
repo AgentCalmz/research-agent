@@ -1,101 +1,100 @@
 # Opportunist Research Agent
 
-A local-first research and opportunity-discovery agent: **the model is the brain; your PC is the body.**
+A local-first **opportunity hunting engine**: the model is the decision brain, while your PC performs the high-volume research.
 
-The runtime is designed to hunt for concrete opportunities rather than merely explain how a user could find them.
+The goal is not to answer “how could I find an opportunity?” It is to **find concrete opportunities**, verify the underlying evidence, remove duplicates, score them, and return source-linked targets.
 
-## Configurable brain
+## What this version does
 
-The agent supports two API paths behind the `BrainProvider` interface:
+The runtime now uses a three-layer research architecture:
 
-- **OpenRouter** — use one OpenRouter key and select an OpenRouter model such as `deepseek/deepseek-v4.1-flash`.
-- **Direct DeepSeek** — send requests straight to `https://api.deepseek.com` using `deepseek-flash`, the current API name for DeepSeek V4.1 Flash.
-
-DeepSeek's current API supports OpenAI-compatible Chat Completions, Responses API, and tool calls. The current `deepseek-flash` model has a 1M-token context window and supports tool calls.
-
-Choose the provider with:
-
-```env
-BRAIN_PROVIDER=openrouter
+```text
+USER OBJECTIVE
+      │
+      ▼
+LLM STRATEGY PLAN
+      │
+      ▼
+LOCAL DISCOVERY (parallel)
+      │
+      ├── web search
+      ├── source diversity
+      └── candidate extraction
+      │
+      ▼
+ENTITY RESOLUTION
+      │
+      ├── name normalization
+      ├── phone normalization
+      ├── URL canonicalization
+      └── duplicate merging
+      │
+      ▼
+LOCAL VERIFICATION (parallel)
+      │
+      ├── source cross-checks
+      ├── page fetching
+      ├── website checks
+      ├── contact extraction
+      ├── freshness signals
+      └── contradiction-aware evidence
+      │
+      ▼
+OPPORTUNITY ENGINE
+      │
+      ├── confidence
+      ├── evidence strength
+      ├── commercial/job signals
+      └── deterministic score
+      │
+      ▼
+OPTIONAL LOCAL/LLM REFINEMENT
+      │
+      ▼
+ONE COMPACT FINAL SYNTHESIS
 ```
 
-or:
+The model is **not** used as a web transport layer. Search, fetching, normalization, deduplication, verification, scoring, and persistence happen locally.
+
+## Opportunity domains
+
+### Job hunting
+
+The job strategy searches multiple source families instead of relying on one website:
+
+- LinkedIn Jobs
+- Jobberman
+- HotNigerianJobs
+- MyJobMag
+- Indeed Nigeria
+- LEEP Jobs
+
+It looks for job title, employer, location, freshness, application signals, source diversity, and duplicate listings.
+
+### Business / digital-gap opportunities
+
+The business strategy is designed for opportunities such as:
+
+- businesses that appear to have no independent website
+- businesses with active social presence but weak web presence
+- businesses whose online identity is inconsistent
+- possible website/digital-presence leads
+
+A business is not classified as “no website” because one request fails. The engine looks for multiple observations and avoids treating generic listicles or lead-generation landing pages as a verified business entity.
+
+## Brain providers
+
+The same research engine can use different LLM providers:
+
+### Direct DeepSeek
 
 ```env
 BRAIN_PROVIDER=deepseek
+DEEPSEEK_API_KEY=your_key_here
+DEEPSEEK_MODEL=deepseek-flash
 ```
 
-Direct DeepSeek does **not** route through OpenRouter.
-
-The provider is selected at startup; discovery, evidence, scoring, storage, and the CLI stay unchanged.
-
-## Local-first efficiency
-
-The model is **not** called for ordinary computation or web transport.
-
-- Web search, HTTP fetching, DNS, contact extraction, crawling, scoring, persistence, and deduplication run locally.
-- The default agent uses **3 model phases**: discovery, verification, final synthesis.
-- Phase 1 exposes only discovery tools; phase 2 exposes verification tools; phase 3 exposes no tools.
-- Independent tool calls are batched in parallel.
-- Raw HTML and large tool payloads are compacted locally before being returned to the model.
-- An optional fallback model is used only when the primary model/provider fails.
-
-This keeps the API for tasks that genuinely benefit from reasoning rather than using it as a general-purpose data pipeline.
-
-## What is implemented
-
-- **Provider-isolated brain** with selectable OpenRouter or direct DeepSeek.
-- **DeepSeek V4.1 Flash** as the default cost-efficient agentic model.
-- **Tool-driven research loop** with bounded phases and parallel independent tool calls.
-- **Free/configurable web discovery** using DuckDuckGo HTML search by default, or a SearXNG endpoint.
-- **Business discovery** across multiple public-web query patterns.
-- **Evidence gathering** from public pages, contacts, domains, and social profiles.
-- **Website classification** that treats absence cautiously instead of equating one HTTP failure with “no website.”
-- **Robots-aware bounded crawling** with same-origin page limits.
-- **Deterministic opportunity scoring** so the LLM does not invent the ranking logic.
-- **Validated local persistence** in `data/opportunities.jsonl` for reusable research memory.
-- **GitHub Actions CI** for TypeScript build and core tests.
-
-## First target workflow
-
-Example request:
-
-```text
-Find businesses in Abuja that appear to operate without an independent website. Return 20 strong opportunities with evidence, public source links, contact information where available, confidence, and an opportunity score.
-```
-
-The agent should:
-
-```text
-USER INTENT
-    ↓
-OPPORTUNITY DEFINITION
-    ↓
-LOCAL DISCOVERY
-    ↓
-LOCAL INVESTIGATION
-    ↓
-LOCAL VERIFICATION
-    ↓
-DETERMINISTIC SCORING
-    ↓
-ONE COMPACT FINAL SYNTHESIS
-    ↓
-ACTIONABLE RESULTS + SOURCE LINKS
-```
-
-A “no website” result is treated as a classification supported by multiple observations such as public business listings, social presence, candidate-domain checks, and reachable-site checks. It is not inferred from a single failed request.
-
-## Setup
-
-Requirements: Node.js 20+.
-
-```bash
-npm install
-cp .env.example .env
-```
-
-On Windows Git Bash, `cp` works; PowerShell users can use `Copy-Item .env.example .env`.
+This talks directly to DeepSeek rather than routing through OpenRouter.
 
 ### OpenRouter
 
@@ -106,6 +105,54 @@ OPENROUTER_MODEL=deepseek/deepseek-v4.1-flash
 OPENROUTER_FALLBACK_MODELS=
 ```
 
+Provider selection does not change the local discovery and verification engine.
+
+## Token and request efficiency
+
+The primary optimization target is **capability per model call**, not minimizing calls at any cost.
+
+The current design therefore:
+
+- uses the LLM for strategy and interpretation rather than raw crawling
+- runs independent searches in parallel
+- batches local verification
+- keeps only compact evidence envelopes for model input
+- uses a single final synthesis call
+- makes a refinement call only when the first pass is weak
+- avoids repeatedly sending whole HTML pages to the model
+- verifies only a bounded set of candidates
+- keeps HTTP budgets separate from LLM budgets
+
+This makes it possible to perform much more web research than a loop that calls the model after every individual search or fetch.
+
+## Research state
+
+Candidates carry structured state rather than existing only in a temporary prompt:
+
+```text
+candidate
+├── identity
+├── job/business type
+├── location
+├── source URLs
+├── observed facts
+├── evidence
+├── status
+├── confidence
+└── opportunity score
+```
+
+That state is then converted into a compact evidence envelope for final synthesis.
+
+## Running it
+
+Requirements: Node.js 20+.
+
+```bash
+npm install
+cp .env.example .env
+```
+
 ### Direct DeepSeek
 
 ```env
@@ -114,13 +161,19 @@ DEEPSEEK_API_KEY=your_key_here
 DEEPSEEK_MODEL=deepseek-flash
 ```
 
-DeepSeek's official documentation lists `https://api.deepseek.com` as the OpenAI-compatible base URL and `deepseek-flash` as the current V4.1 Flash API model name.
+### OpenRouter
 
-Shared runtime settings:
+```env
+BRAIN_PROVIDER=openrouter
+OPENROUTER_API_KEY=your_key_here
+OPENROUTER_MODEL=deepseek/deepseek-v4.1-flash
+OPENROUTER_FALLBACK_MODELS=
+```
+
+Shared settings:
 
 ```env
 SEARCH_BACKEND=duckduckgo
-MAX_AGENT_STEPS=3
 MAX_REQUESTS=40
 BRAIN_MIN_INTERVAL_MS=750
 BRAIN_MAX_OUTPUT_TOKENS=900
@@ -128,61 +181,56 @@ REQUEST_TIMEOUT_MS=15000
 DATA_DIR=./data
 ```
 
-Run:
+Build and test:
 
 ```bash
-npm run build
 npm test
-npm start -- "Find 5 Abuja businesses that appear to have no independent website. Verify each lead and return source links."
 ```
 
-Development mode:
+Run a business hunt:
 
 ```bash
-npm run dev -- "Find 10 salons in Abuja with active social profiles but no independent website."
+npm start -- "Find 5 businesses in Abuja that appear to have no independent website. Verify each lead using multiple public sources and return source links and public contact information."
+```
+
+Run a job hunt:
+
+```bash
+npm start -- "Find 10 software engineering jobs in Abuja or remote Nigeria posted recently. Deduplicate repeated listings, verify the employer and source, and return application URLs."
 ```
 
 ## Search backends
 
-The default backend is DuckDuckGo HTML because it requires no separate search API key. For stronger control, configure SearXNG:
+The default search backend is DuckDuckGo HTML and requires no separate search API key.
+
+For a self-hosted SearXNG instance:
 
 ```env
 SEARCH_BACKEND=searxng
 SEARXNG_URL=https://your-searxng-instance/search
 ```
 
-Search availability, ranking, and rate limits vary by backend. The agent treats search as discovery evidence, not ground truth.
-
-## Architecture
-
-```text
-                    CONFIGURED BRAIN
-              ┌───────────┴────────────┐
-              │                        │
-        OpenRouter              Direct DeepSeek
-              │                        │
-              └──────────┬─────────────┘
-                         │ only at decision points
-                         ▼
-                LOCAL RESEARCH BODY
-        ┌─────────────────┼─────────────────┐
-        ▼                 ▼                 ▼
-     Discovery          Evidence          Memory
-     ├ search           ├ fetch            └ opportunities.jsonl
-     ├ businesses       ├ contacts
-     └ socials          ├ domain checks
-                        └ website status
-        │                 │
-        └─────────┬───────┘
-                  ▼
-           Opportunity Engine
-           ├ score
-           ├ rank
-           └ explain with sources
-```
+Search engines are treated as discovery sources rather than unquestioned ground truth.
 
 ## Important boundaries
 
-This project is local-first and evidence-driven. It works with public information and does not bypass authentication, paywalls, CAPTCHAs, or access controls. Crawling is bounded and respects fetched robots rules.
+The project works with public information and does not bypass authentication, CAPTCHAs, paywalls, or access controls.
 
-The brain is deliberately replaceable. The next provider can implement the same `BrainProvider` interface without changing discovery, evidence, scoring, storage, or the CLI.
+A failed request, missing search result, or DNS failure alone is never sufficient to establish that something does not exist.
+
+## Roadmap
+
+The architecture is now ready for deeper opportunity domains:
+
+- user profile / CV-based job matching
+- company and employer resolution
+- stronger job-posting extraction
+- recency/deadline detection
+- application-path verification
+- source reliability models
+- contradiction graphs
+- persistent entity memory
+- scheduled opportunity hunts
+- richer local source adapters
+- browser automation for public pages where permitted
+- additional opportunity types such as grants, contracts, procurement, internships, and freelance demand

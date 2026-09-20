@@ -54,7 +54,7 @@ OPTIONAL LOCAL/LLM REFINEMENT
 ONE COMPACT FINAL SYNTHESIS
 ```
 
-The model is **not** used as a web transport layer. Search, fetching, normalization, deduplication, verification, scoring, and persistence happen locally.
+The model is **not** used as a web transport layer. Search, fetching, normalization, deduplication, verification, scoring, and persistence happen locally. The hunter is iterative: it keeps opening new search angles and verifying new or uncertain candidates until the requested target is reached, the research budget is exhausted, or repeated rounds stop producing credible new evidence.
 
 ## Opportunity domains
 
@@ -80,7 +80,7 @@ The business strategy is designed for opportunities such as:
 - businesses whose online identity is inconsistent
 - possible website/digital-presence leads
 
-A business is not classified as “no website” because one request fails. The engine looks for multiple observations and avoids treating generic listicles or lead-generation landing pages as a verified business entity.
+A business is not classified as “no website” because one request fails. The engine looks for multiple observations and avoids treating generic listicles or lead-generation landing pages as a verified business entity. Social profiles alone are not counted as independent corroboration.
 
 ## Brain providers
 
@@ -120,7 +120,8 @@ The current design therefore:
 - uses a single final synthesis call
 - makes a refinement call only when the first pass is weak
 - avoids repeatedly sending whole HTML pages to the model
-- verifies only a bounded set of candidates
+- verifies candidates in repeated batches until the requested target is reached or the research budget/no-progress limit is reached
+- retains credible near-misses in a `To check` section instead of silently discarding them
 - keeps HTTP budgets separate from LLM budgets
 
 This makes it possible to perform much more web research than a loop that calls the model after every individual search or fetch.
@@ -174,7 +175,7 @@ Shared settings:
 
 ```env
 SEARCH_BACKEND=duckduckgo
-MAX_REQUESTS=40
+MAX_REQUESTS=80
 BRAIN_MIN_INTERVAL_MS=750
 BRAIN_MAX_OUTPUT_TOKENS=900
 REQUEST_TIMEOUT_MS=15000

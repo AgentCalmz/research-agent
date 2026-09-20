@@ -45,7 +45,7 @@ export class DeepSeekBrain implements BrainProvider {
     const body = {
       model: this.model,
       max_tokens: this.maxOutputTokens,
-      extra_body: { thinking: { type: 'disabled' as const } },
+      reasoning_effort: 'none',
       messages: [
         { role: 'system', content: `${SYSTEM}\n\n${input.system}` },
         { role: 'user', content: input.user }

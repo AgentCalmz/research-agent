@@ -24,7 +24,7 @@ const JOB_LISTING_HOSTS = new Map<string, RegExp>([
 const PROFILE_HOSTS = /(^|\.)(linkedin\.com|upwork\.com)$/i;
 const SOCIAL_HOSTS = /(^|\.)(instagram\.com|facebook\.com|linkedin\.com|tiktok\.com|x\.com)$/i;
 const DIRECTORY_HOSTS = /(^|\.)(businesslist\.com\.ng|finelib\.com|yellowpages|connectciti\.com|foursquare\.com|tripadvisor\.|yelp\.|directory\.org\.ng|nigeriabusinessweb\.com|geoleadsweb\.com)$/i;
-const EDITORIAL_HOSTS = /(^|\.)(wakaabuja\.com|abujaeats\.com\.ng|ranked\.ng|abujabusinessnews\.com)$/i;
+const EDITORIAL_HOSTS = /(^|\.)(wakaabuja\.com|abujaeats\.com\.ng|ranked\.ng|abujabusinessnews\.com|sabiabuja\.com|whatsoninabuja\.com)$/i;
 
 export function isSocialUrl(url: string): boolean {
   return SOCIAL_HOSTS.test(hostOf(url));
@@ -82,15 +82,32 @@ export function isBusinessCandidateUrl(url: string): boolean {
 
 export function isSearchNoise(title: string, snippet = ''): boolean {
   const text = normalizeText(`${title} ${snippet}`);
-  return /\b(top \d+|best \d+|list of|directory|category|city guide|popular|without websites|businesses without websites|how to|guide|review of|my experience)\b/.test(text);
+  return /\b(top \d+|best \d+|\d+\s+(?:trendy|best|top)|list of|directory|category|city guide|popular|without websites|businesses without websites|how to|guide|review of|my experience|find best|eat and drink|remote jobs?|jobs? in [a-z ]+$|job board|job listings?|search jobs|job alerts?|sign up for similar job alerts)\b/.test(text);
 }
-
 export function looksLikeIndependentBusinessSite(url: string): boolean {
   return !isSocialUrl(url) && !isDirectoryUrl(url) && !isEditorialUrl(url) &&
     !/google\.|bing\.|duckduckgo\.|youtube\.|wikipedia\./i.test(hostOf(url));
 }
 
 export function isLikelyJobListing(url: string, title = '', snippet = ''): boolean {
+  if (isJobProfileUrl(url) || isJobIndexUrl(url)) return false;
+  if (isJobListingUrl(url)) return true;
+
+  const text = normalizeText(`${title} ${snippet}`);
+  const genericIndexSignal = /\b(remote jobs?|jobs? in|job board|job listings?|search jobs|find jobs|job alerts?|similar job alerts|career opportunities|job openings?)\b/.test(text);
+  if (genericIndexSignal) return false;
+
+  const hasJobSignal = /\b(job|vacancy|position|role|hiring|recruiting|recruitment|apply|career|careers)\b/.test(text);
+  const strongDetailSignal = /\b(responsibilit|requirements?|qualifications?|job description|how to apply|apply now|is recruiting|is hiring|vacancy|position)\b/.test(text);
+  const hasEmployerSignal =
+    /\b(?:company|employer)\s*[:\-]\s*[a-z0-9]/i.test(text) ||
+    /\b(?:at|with)\s+[a-z][a-z0-9&.'-]*(?:\s+[a-z][a-z0-9&.'-]*){0,5}\b/i.test(text) ||
+    /\b[a-z][a-z0-9&.'-]*(?:\s+[a-z][a-z0-9&.'-]*){0,5}\s+is\s+(?:recruiting|hiring)\b/i.test(text);
+  const profileSignal = /\b(engineer|developer|designer|consultant|freelancer|portfolio|about me|my profile)\b/.test(text) &&
+    /\b(i am|years? experience|my work|portfolio)\b/.test(text);
+  return hasJobSignal && strongDetailSignal && hasEmployerSignal && !profileSignal;
+}
+
   if (isJobProfileUrl(url) || isJobIndexUrl(url)) return false;
   if (isJobListingUrl(url)) return true;
   const text = normalizeText(`${title} ${snippet}`);

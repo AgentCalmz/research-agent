@@ -4,11 +4,8 @@ import { OpenRouterBrain } from './brain/openrouter.js';
 import { DeepSeekBrain } from './brain/deepseek.js';
 import { DuckDuckGoSearch, SearxngSearch } from './discovery/search.js';
 import { OpportunityHunter } from './opportunity/hunter.js';
-import { registerBuiltinTools } from './runtime/builtin-tools.js';
-import { registerDiscoveryTools } from './runtime/discovery-tools.js';
 import { configureHttp } from './runtime/http.js';
 import { OpportunityStore } from './runtime/store.js';
-import { ToolRegistry } from './runtime/tools.js';
 
 const request = process.argv.slice(2).join(' ').trim();
 
@@ -25,10 +22,6 @@ try {
     ? new SearxngSearch(config.searxngUrl!)
     : new DuckDuckGoSearch();
 
-  const registry = new ToolRegistry();
-  registerBuiltinTools(registry);
-  registerDiscoveryTools(registry, search, new OpportunityStore(config.dataDir));
-
   const brain = config.brainProvider === 'deepseek'
     ? new DeepSeekBrain(
         config.deepSeekApiKey!,
@@ -44,7 +37,8 @@ try {
         config.brainMaxOutputTokens
       );
 
-  console.log(await new ResearchAgent(brain, registry, config.maxAgentSteps).run(request));
+  const hunter = new OpportunityHunter(brain, search, new OpportunityStore(config.dataDir));
+  console.log(await hunter.run(request));
 } catch (error) {
   console.error(error instanceof Error ? error.message : String(error));
   process.exit(1);

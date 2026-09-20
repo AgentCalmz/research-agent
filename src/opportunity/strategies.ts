@@ -207,8 +207,12 @@ function extractJobName(title: string): string {
 }
 
 function extractJobCompany(title: string): string | undefined {
-  const match = title.match(/\s+(?:at|@)\s+([^|–—-]+)$/i);
-  return match?.[1]?.trim();
+  const direct = title.match(/\s+(?:at|@)\s+([^|–—-]+)$/i);
+  if (direct?.[1]) return direct[1].trim();
+  const recruiting = title.match(/([A-Z][A-Za-z0-9&.' -]{2,80}?)\s+is\s+recruiting\s+to\s+fill\s+the\s+position/i);
+  if (recruiting?.[1]) return recruiting[1].trim();
+  const hiring = title.match(/([A-Z][A-Za-z0-9&.' -]{2,80}?)\s+(?:is\s+)?hiring\b/i);
+  return hiring?.[1]?.trim();
 }
 
 export { JOB_SOURCES, BUSINESS_SOURCE_HINTS };

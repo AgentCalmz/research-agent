@@ -463,9 +463,10 @@ export class OpportunityHunter {
         evidence: candidate.evidence.slice(-10)
       }));
 
-    await Promise.all(opportunities.map((opportunity) => this.store.save(opportunity)));
+    await Promise.all(opportunities.slice(0, Math.min(plan.requestedCount, 20)).map((opportunity) => this.store.save(opportunity)));
 
-    const evidenceEnvelope = candidates.slice(0, 12).map(compactCandidate).join('\n');
+    const envelopeLimit = Math.min(20, Math.max(8, plan.requestedCount * 2));
+    const evidenceEnvelope = candidates.slice(0, envelopeLimit).map(compactCandidate).join('\n');
     const finalResponse = await this.brain.complete({
       system: `You are the final decision and synthesis brain. Do not invent missing facts. Use only the compact evidence envelope supplied below. Return at most ${plan.requestedCount} opportunities. Prefer verified candidates; clearly label any uncertain candidate instead of presenting it as verified. For jobs, include employer, location, freshness, fit signals, and application/source URLs when present. For business website-gap opportunities, explain why the evidence supports the digital gap and list public contact/source URLs.\n\nEvidence envelope:\n${evidenceEnvelope}`,
       user: request,

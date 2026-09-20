@@ -124,17 +124,16 @@ export function buildQueries(input: { mode: HuntMode; location?: string; roles?:
     const skillHint = input.skills?.length ? input.skills.join(' ') : '';
     const preference = input.workPreference && input.workPreference !== 'any' ? input.workPreference : '';
     return [...new Set(roleTerms.flatMap((role) => [
-      `${role} ${skillHint} ${preference} ${location}`.replace(/\s+/g, ' ').trim(),
+      `site:jobberman.com/listings ${role} ${location}`,
+      `site:hotnigerianjobs.com/hotjobs ${role} ${location}`,
+      `site:myjobmag.com/job ${role} ${location}`,
+      `site:ng.indeed.com/viewjob ${role} ${location}`,
+      `site:linkedin.com/jobs/view ${role} ${location}`,
+      `site:jobs.leep.gov.ng ${role} ${location}`,
       `${role} ${skillHint} hiring ${preference} ${location}`.replace(/\s+/g, ' ').trim(),
-      `${role} ${skillHint} ${location} apply`,
-      `site:linkedin.com/jobs ${role} ${location}`,
-      `site:jobberman.com ${role} ${location}`,
-      `site:hotnigerianjobs.com ${role} ${location}`,
-      `site:myjobmag.com ${role} ${location}`,
-      `site:ng.indeed.com ${role} ${location}`,
-      `site:jobs.leep.gov.ng ${role} ${location}`
-    ]))];
-  }
+      `${role} ${skillHint} ${preference} ${location}`.replace(/\s+/g, ' ').trim(),
+      `${role} ${skillHint} ${location} apply`
+    ]))];  }
 
   if (input.mode === 'business_website_gap') {
     const category = input.categories?.length ? input.categories.join(' ') : 'businesses';

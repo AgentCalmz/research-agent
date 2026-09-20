@@ -43,3 +43,7 @@ test('rejects current observed generic business result pages', () => {
 test('rejects current observed job index result', () => {
   assert.equal(isLikelyJobListing('https://arc.dev/en-ng/remote-jobs', 'Remote Jobs in Nigeria (September 2026) - Arc', 'Remote jobs in Nigeria. Sign up for similar job alerts.'), false);
 });
+
+test('rejects generic job-board pages', () => {
+  assert.equal(isLikelyJobListing('https://example.com/remote-jobs', 'Remote Jobs in Nigeria', 'Sign up for similar job alerts.'), false);
+});

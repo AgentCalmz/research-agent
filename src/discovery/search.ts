@@ -42,7 +42,8 @@ export class DuckDuckGoSearch implements SearchProvider {
       } catch { /* keep original href */ }
       try {
         const absolute = new URL(href, 'https://duckduckgo.com').toString();
-        results.push({ title: cleanHtml(rawTitle, 300), url: absolute, source: 'duckduckgo' });
+        results.push({ title: cleanHtml(rawTitle, 300), url: absolute, snippet: snippets[index] || undefined, source: 'duckduckgo' });
+        index += 1;
       } catch { /* ignore malformed result links */ }
       if (results.length >= limit) break;
     }

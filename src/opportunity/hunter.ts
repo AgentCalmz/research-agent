@@ -4,7 +4,7 @@ import type { SearchProvider, SearchResult } from '../discovery/search.js';
 import { cleanHtml, fetchText } from '../runtime/http.js';
 import { OpportunityStore } from '../runtime/store.js';
 import { canonicalizeUrl, hostOf, normalizeText, sameEntity } from './entities.js';
-import { isJobListingUrl, isSocialUrl, isDirectoryUrl, isEditorialUrl, looksLikeIndependentBusinessSite } from './source-policy.js';
+import { isJobListingUrl, isLikelyJobListing, looksLikeIndependentBusinessSite } from './source-policy.js';
 import { candidateFromResult, defaultPlan, buildQueries } from './strategies.js';
 import type { CandidateRecord, HuntMode, ResearchPlan } from './types.js';
 
@@ -153,7 +153,7 @@ async function verifyJob(candidate: CandidateRecord, plan: ResearchPlan, search:
   const evidenceItems = [...candidate.evidence];
   let combinedText = sources.map((result) => result.snippet || '').join(' ');
 
-  const fetchTargets = sources.filter((result) => isJobListingUrl(result.url)).slice(0, 1);
+  const fetchTargets = sources.filter((result) => isLikelyJobListing(result.url, result.title, result.snippet)).slice(0, 1);
 
   for (const result of fetchTargets) {
     try {
@@ -171,7 +171,7 @@ async function verifyJob(candidate: CandidateRecord, plan: ResearchPlan, search:
   const postedAt = extractDate(combinedText);
   const fresh = postedAt ? ((Date.now() - postedAt.getTime()) / 86400000 <= plan.freshnessDays) : false;
   const applySignal = /apply now|apply|submit (?:cv|resume)|careers portal|how to apply|send (?:your )?(?:cv|resume)/i.test(combinedText);
-  const directListing = isJobListingUrl(candidate.sourceUrl);
+  const directListing = isLikelyJobListing(candidate.sourceUrl, candidate.title || candidate.name, candidate.sources[0]?.snippet);
   const jobContentSignal = /(?:responsibilit|requirements?|qualifications?|experience|how to apply|apply now|recruiting|vacancy|position|job description)/i.test(combinedText);
   const roleTokens = plan.roles.flatMap((role) => normalizeText(role).split(' ').filter((token) => token.length >= 3));
   const skillTokens = plan.skills.flatMap((skill) => normalizeText(skill).split(' ').filter((token) => token.length >= 3));
@@ -283,6 +283,41 @@ async function verifyBusiness(candidate: CandidateRecord, plan: ResearchPlan, se
     confidence: Math.min(1, reachableIndependent ? 0.95 : noIndependentWebsite ? 0.7 : 0.45),
     score
   };
+}
+
+function renderDeterministicResults(candidates: CandidateRecord[], mode: HuntMode, requestedCount: number): string {
+  const verified = candidates.filter((candidate) => candidate.status === 'verified' && candidate.confidence >= 0.6).slice(0, Math.min(requestedCount, 20));
+  if (!verified.length) {
+    return [
+      '## Result: insufficient verified evidence — objective not met',
+      '',
+      `No qualifying ${mode === 'jobs' ? 'job listings' : 'opportunities'} reached the verification threshold.`,
+      'The engine deliberately withheld weak candidates rather than presenting profiles, directories, or unsupported claims as opportunities.'
+    ].join('\n');
+  }
+
+  return [
+    `## Verified opportunities (${verified.length})`,
+    '',
+    ...verified.map((candidate, index) => {
+      const facts = candidate.facts;
+      const sourceUrls = [...new Set(candidate.sources.map((source) => source.url))].slice(0, 4);
+      const evidenceUrls = [...new Set(candidate.evidence.map((item) => item.source.url))].slice(0, 6);
+      const contacts = [facts.phones ? `Phones: ${facts.phones}` : '', facts.emails ? `Emails: ${facts.emails}` : ''].filter(Boolean);
+      return [
+        `### ${index + 1}. ${candidate.title || candidate.name}`,
+        candidate.kind === 'job' ? `Company: ${facts.company || 'Not verified'}` : `Business: ${candidate.name}`,
+        candidate.location ? `Location: ${candidate.location}` : '',
+        facts.postedAt ? `Posted: ${facts.postedAt}` : '',
+        `Opportunity score: ${candidate.score}/10`,
+        `Confidence: ${Math.round(candidate.confidence * 100)}%`,
+        contacts.join(' | '),
+        candidate.kind === 'job' ? `Application/source: ${candidate.sourceUrl}` : `Source: ${candidate.sourceUrl}`,
+        sourceUrls.length ? `Sources: ${sourceUrls.join(' | ')}` : '',
+        evidenceUrls.length ? `Evidence: ${evidenceUrls.join(' | ')}` : ''
+      ].filter(Boolean).join('\n');
+    })
+  ].join('\n\n');
 }
 
 function compactCandidate(candidate: CandidateRecord): string {
@@ -476,6 +511,8 @@ export class OpportunityHunter {
       tools: []
     });
 
-    return finalResponse.text || candidates.slice(0, 10).map(compactCandidate).join('\n');
+    const synthesized = finalResponse.text?.trim();
+    if (synthesized && !/^\s*[{[]\"?id/i.test(synthesized)) return synthesized;
+    return renderDeterministicResults(candidates, plan.mode, plan.requestedCount);
   }
 }

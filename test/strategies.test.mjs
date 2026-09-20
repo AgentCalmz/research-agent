@@ -48,3 +48,8 @@ test('default plan keeps verification bounded', () => {
   const plan = defaultPlan('Find businesses in Abuja without websites');
   assert.equal(plan.verifyLimit <= 6, true);
 });
+
+test('strips the requested count from business category extraction', () => {
+  const plan = defaultPlan('Find 5 businesses in Abuja without independent websites');
+  assert.deepEqual(plan.categories, ['businesses']);
+});

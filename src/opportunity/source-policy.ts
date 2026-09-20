@@ -18,7 +18,7 @@ const JOB_LISTING_HOSTS = new Map<string, RegExp>([
   ['myjobmag.com', /\/job\/|\/job-opening|\/jobs\/[^/]+/i],
   ['indeed.com', /\/viewjob\//i],
   ['linkedin.com', /\/jobs\/view\//i],
-  ['ng.jooble.org', /\/jobs-[^/]+\/[^/]+/i]
+  // Jooble search/category pages are treated as indexes; require a concrete listing from other sources.
 ]);
 
 const PROFILE_HOSTS = /(^|\.)(linkedin\.com|upwork\.com)$/i;

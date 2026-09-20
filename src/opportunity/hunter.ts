@@ -601,6 +601,11 @@ function renderToCheck(candidate: CandidateRecord, index: number, mode: HuntMode
   ].filter(Boolean).join('\n');
 }
 
+function isEligibleCandidate(candidate: CandidateRecord, mode: HuntMode): boolean {
+  if (candidate.status !== 'verified' || candidate.confidence < 0.6) return false;
+  if (mode === 'business_website_gap') return candidate.facts.noIndependentWebsite === true && !candidate.facts.matchedWebsiteUrl;
+  return true;
+}
 export class OpportunityHunter {
   constructor(
     private readonly brain: BrainProvider,

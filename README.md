@@ -4,11 +4,30 @@ A local-first research and opportunity-discovery agent: **the model is the brain
 
 The runtime is designed to hunt for concrete opportunities rather than merely explain how a user could find them.
 
-## Current brain
+## Configurable brain
 
-The default brain is **OpenRouter + DeepSeek V4.1 Flash**. OpenRouter provides an OpenAI-compatible endpoint and can route tool-calling requests across providers; DeepSeek positions V4.1 Flash for coding, terminal/computer-use agents, and long-horizon tasks. The current listed price is $0.15/M input and $0.60/M output with a 1.05M context window. citehttps://openrouter.ai/provider/deepseek
+The agent supports two API paths behind the `BrainProvider` interface:
 
-The brain is configurable and isolated behind `BrainProvider`, so stronger or cheaper models can be introduced without changing the local research runtime.
+- **OpenRouter** — use one OpenRouter key and select an OpenRouter model such as `deepseek/deepseek-v4.1-flash`.
+- **Direct DeepSeek** — send requests straight to `https://api.deepseek.com` using `deepseek-flash`, the current API name for DeepSeek V4.1 Flash.
+
+DeepSeek's current API supports OpenAI-compatible Chat Completions, Responses API, and tool calls. The current `deepseek-flash` model has a 1M-token context window and supports tool calls.
+
+Choose the provider with:
+
+```env
+BRAIN_PROVIDER=openrouter
+```
+
+or:
+
+```env
+BRAIN_PROVIDER=deepseek
+```
+
+Direct DeepSeek does **not** route through OpenRouter.
+
+The provider is selected at startup; discovery, evidence, scoring, storage, and the CLI stay unchanged.
 
 ## Local-first efficiency
 
@@ -25,7 +44,7 @@ This keeps the API for tasks that genuinely benefit from reasoning rather than u
 
 ## What is implemented
 
-- **Provider-isolated brain** with OpenRouter as the current provider.
+- **Provider-isolated brain** with selectable OpenRouter or direct DeepSeek.
 - **DeepSeek V4.1 Flash** as the default cost-efficient agentic model.
 - **Tool-driven research loop** with bounded phases and parallel independent tool calls.
 - **Free/configurable web discovery** using DuckDuckGo HTML search by default, or a SearXNG endpoint.
@@ -78,12 +97,28 @@ cp .env.example .env
 
 On Windows Git Bash, `cp` works; PowerShell users can use `Copy-Item .env.example .env`.
 
-Put your OpenRouter API key in `.env`:
+### OpenRouter
 
 ```env
+BRAIN_PROVIDER=openrouter
 OPENROUTER_API_KEY=your_key_here
 OPENROUTER_MODEL=deepseek/deepseek-v4.1-flash
 OPENROUTER_FALLBACK_MODELS=
+```
+
+### Direct DeepSeek
+
+```env
+BRAIN_PROVIDER=deepseek
+DEEPSEEK_API_KEY=your_key_here
+DEEPSEEK_MODEL=deepseek-flash
+```
+
+DeepSeek's official documentation lists `https://api.deepseek.com` as the OpenAI-compatible base URL and `deepseek-flash` as the current V4.1 Flash API model name.
+
+Shared runtime settings:
+
+```env
 SEARCH_BACKEND=duckduckgo
 MAX_AGENT_STEPS=3
 MAX_REQUESTS=40
@@ -122,27 +157,28 @@ Search availability, ranking, and rate limits vary by backend. The agent treats 
 
 ```text
                     CONFIGURED BRAIN
-                 ┌────────────────────┐
-                 │ OpenRouter         │
-                 │ DeepSeek V4.1 Flash│
-                 └─────────┬──────────┘
-                           │ only at decision points
-                           ▼
-                  LOCAL RESEARCH BODY
-        ┌──────────────────┼──────────────────┐
-        ▼                  ▼                  ▼
-     Discovery           Evidence           Memory
-     ├ search            ├ fetch             └ opportunities.jsonl
-     ├ businesses        ├ contacts
-     └ socials            ├ domain checks
-                           └ website status
-        │                  │
-        └──────────┬───────┘
-                   ▼
-            Opportunity Engine
-            ├ score
-            ├ rank
-            └ explain with sources
+              ┌───────────┴────────────┐
+              │                        │
+        OpenRouter              Direct DeepSeek
+              │                        │
+              └──────────┬─────────────┘
+                         │ only at decision points
+                         ▼
+                LOCAL RESEARCH BODY
+        ┌─────────────────┼─────────────────┐
+        ▼                 ▼                 ▼
+     Discovery          Evidence          Memory
+     ├ search           ├ fetch            └ opportunities.jsonl
+     ├ businesses       ├ contacts
+     └ socials          ├ domain checks
+                        └ website status
+        │                 │
+        └─────────┬───────┘
+                  ▼
+           Opportunity Engine
+           ├ score
+           ├ rank
+           └ explain with sources
 ```
 
 ## Important boundaries

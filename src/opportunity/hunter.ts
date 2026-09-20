@@ -169,7 +169,6 @@ async function verifyJob(candidate: CandidateRecord, plan: ResearchPlan, search:
   const postedAt = extractDate(combinedText);
   const fresh = postedAt ? ((Date.now() - postedAt.getTime()) / 86400000 <= plan.freshnessDays) : false;
   const applySignal = /apply now|apply|submit (?:cv|resume)|careers portal/i.test(combinedText);
-  const roleText = [candidate.title || candidate.name, ...plan.roles].join(' ');
   const roleTokens = plan.roles.flatMap((role) => normalizeText(role).split(' ').filter((token) => token.length >= 3));
   const normalizedJob = normalizeText(candidate.title || candidate.name);
   const roleMatch = roleTokens.length > 0 && roleTokens.filter((token) => normalizedJob.includes(token)).length / roleTokens.length >= 0.5;

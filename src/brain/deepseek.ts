@@ -45,7 +45,7 @@ export class DeepSeekBrain implements BrainProvider {
     const response = await this.client.chat.completions.create({
       model: this.model,
       max_tokens: this.maxOutputTokens,
-      reasoning_effort: 'none',
+      reasoning_effort: 'low',
       messages: [
         { role: 'system', content: `${SYSTEM}\n\n${input.system}` },
         { role: 'user', content: input.user }

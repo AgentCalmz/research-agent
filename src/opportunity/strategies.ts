@@ -1,6 +1,6 @@
 import type { SearchResult } from '../discovery/search.js';
 import { normalizeText, hostOf } from './entities.js';
-import { isBusinessIndexUrl, isLikelyJobListing, isJobProfileUrl, isSearchNoise } from './source-policy.js';
+import { isBusinessIndexUrl, isEditorialUrl, isLikelyJobListing, isJobProfileUrl, isSearchNoise, looksLikeIndependentBusinessSite } from './source-policy.js';
 import type { HuntMode, ResearchPlan } from './types.js';
 
 const JOB_SOURCES = [
@@ -25,6 +25,7 @@ const BUSINESS_SOURCE_HINTS = [
 const NOISE_PATTERNS = [
   /top\s+\d+/i,
   /best\s+\d+/i,
+  /\branked\b/i,
   /restaurants without websites/i,
   /businesses without websites/i,
   /directory$/i,
@@ -162,6 +163,8 @@ export function candidateFromResult(result: SearchResult, mode: HuntMode, locati
   const cleanTitle = cleanResultTitle(result.title);
   if (!cleanTitle) return null;
   if (mode === 'business_website_gap' && (NOISE_PATTERNS.some((pattern) => pattern.test(cleanTitle)) || isSearchNoise(cleanTitle, result.snippet))) return null;
+  if (mode === 'business_website_gap' && isEditorialUrl(result.url)) return null;
+  if (mode === 'business_website_gap' && looksLikeIndependentBusinessSite(result.url)) return null;
   if (mode === 'business_website_gap' && isBusinessIndexUrl(result.url) && !/\/company\//i.test(result.url)) return null;
   if (mode === 'jobs' && !isLikelyJobListing(result.url, cleanTitle, result.snippet)) return null;
 
@@ -183,12 +186,28 @@ export function candidateFromResult(result: SearchResult, mode: HuntMode, locati
 }
 
 function cleanBusinessName(title: string): string {
-  return title
+  const cleaned = title
     .replace(/\s*\(@[^)]*\)?\s*$/i, '')
     .replace(/\s*[-|]\s*(?:Abuja|Abuja,?\s*Nigeria|Nigeria).*$/i, '')
     .replace(/\s*[-|]\s*Contact.*$/i, '')
     .replace(/\s*[-|]\s*(?:Instagram|Facebook|LinkedIn).*$/i, '')
     .trim();
+
+  const fragments = cleaned
+    .split(/\s*[|–—]\s*/)
+    .map((fragment) => fragment.trim())
+    .filter(Boolean);
+
+  if (fragments.length > 1) {
+    const first = fragments[0]!;
+    const last = fragments[fragments.length - 1]!;
+    const genericFirst = /\b(?:best|top|guide|directory|ranked|popular|places|restaurants|salons|spas)\b/i.test(first);
+    const genericLast = /\b(?:best|top|guide|directory|ranked|popular|places|restaurants|salons|spas)\b/i.test(last);
+    if (genericFirst && !genericLast) return last;
+    if (genericLast && !genericFirst) return first;
+  }
+
+  return cleaned;
 }
 
 function cleanResultTitle(title: string): string {

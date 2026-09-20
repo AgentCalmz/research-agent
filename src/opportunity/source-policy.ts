@@ -107,13 +107,3 @@ export function isLikelyJobListing(url: string, title = '', snippet = ''): boole
     /\b(i am|years? experience|my work|portfolio)\b/.test(text);
   return hasJobSignal && strongDetailSignal && hasEmployerSignal && !profileSignal;
 }
-
-  if (isJobProfileUrl(url) || isJobIndexUrl(url)) return false;
-  if (isJobListingUrl(url)) return true;
-  const text = normalizeText(`${title} ${snippet}`);
-  const hasJobSignal = /\b(job|jobs|vacancy|vacancies|position|role|hiring|recruiting|recruitment|apply|career|careers)\b/.test(text);
-  const hasEmployerSignal = /\b(?:at|for|with)\s+[a-z0-9]/.test(text) || /\brecruiting\b/.test(text);
-  const profileSignal = /\b(engineer|developer|designer|consultant|freelancer|portfolio|about me|my profile)\b/.test(text) &&
-    /\b(i am|years? experience|my work|portfolio)\b/.test(text);
-  return hasJobSignal && hasEmployerSignal && !profileSignal;
-}

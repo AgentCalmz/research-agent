@@ -98,7 +98,7 @@ export function buildQueries(input: { mode: HuntMode; location?: string; roles?:
       `site:myjobmag.com ${role} ${location}`,
       `site:ng.indeed.com ${role} ${location}`,
       `site:jobs.leep.gov.ng ${role} ${location}`
-    ])];
+    ]))];
   }
 
   if (input.mode === 'business_website_gap') {

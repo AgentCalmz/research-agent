@@ -22,7 +22,11 @@ export type ResearchPlan = {
   mode: HuntMode;
   location?: string;
   roles: string[];
+  skills: string[];
   categories: string[];
+  experienceLevel?: string;
+  workPreference?: 'remote' | 'hybrid' | 'onsite' | 'any';
+  excludeTerms: string[];
   queries: string[];
   candidateLimit: number;
   verifyLimit: number;

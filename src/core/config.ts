@@ -59,7 +59,7 @@ export function loadConfig(): Config {
     deepSeekModel: process.env.DEEPSEEK_MODEL ?? 'deepseek-flash',
     searchBackend,
     searxngUrl: process.env.SEARXNG_URL,
-    maxRequests: intEnv('MAX_REQUESTS', 40),
+    maxRequests: intEnv('MAX_REQUESTS', 80),
     requestTimeoutMs: intEnv('REQUEST_TIMEOUT_MS', 15000),
     brainMinIntervalMs: intEnv('BRAIN_MIN_INTERVAL_MS', 750),
     brainMaxOutputTokens: intEnv('BRAIN_MAX_OUTPUT_TOKENS', 900),

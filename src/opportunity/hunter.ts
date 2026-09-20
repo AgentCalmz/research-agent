@@ -1,10 +1,10 @@
 import { randomUUID } from 'node:crypto';
 import type { BrainProvider, Evidence, Opportunity } from '../core/types.js';
 import type { SearchProvider, SearchResult } from '../discovery/search.js';
-import { absoluteUrl, cleanHtml, fetchText } from '../runtime/http.js';
+import { cleanHtml, fetchText } from '../runtime/http.js';
 import { OpportunityStore } from '../runtime/store.js';
 import { canonicalizeUrl, hostOf, normalizeText, sameEntity } from './entities.js';
-import { candidateFromResult, defaultPlan, buildQueries, type JOB_SOURCES } from './strategies.js';
+import { candidateFromResult, defaultPlan, buildQueries } from './strategies.js';
 import type { CandidateRecord, HuntMode, ResearchPlan } from './types.js';
 
 const MAX_DISCOVERY_RESULTS_PER_QUERY = 8;

@@ -107,8 +107,11 @@ function extractContacts(text: string): { phones: string[]; emails: string[] } {
 }
 
 function extractCompany(title: string): string | undefined {
-  const match = title.match(/\b(?:at|@)\s+(.+)$/i);
-  return match?.[1]?.trim();
+  const titleMatch = title.match(/\b(?:at|@)\s+(.+)$/i);
+  if (titleMatch?.[1]) return titleMatch[1].trim();
+
+  const snippetMatch = title.match(/(?:recruiting|recruitment|hiring|vacancy)[^.!?]{0,80}\b(?:at|for)\s+([A-Z][A-Za-z0-9&.' -]{2,80}?)(?:\.|\s+is\s+|\s+to\s+)/i);
+  return snippetMatch?.[1]?.trim();
 }
 
 function extractDate(text: string): Date | undefined {
@@ -161,7 +164,7 @@ async function verifyJob(candidate: CandidateRecord, plan: ResearchPlan, search:
     }
   }
 
-  const company = candidate.facts.company || extractCompany(candidate.title || candidate.name);
+  const company = candidate.facts.company || extractCompany(combinedText) || extractCompany(candidate.title || candidate.name);
   const postedAt = extractDate(combinedText);
   const fresh = postedAt ? ((Date.now() - postedAt.getTime()) / 86400000 <= plan.freshnessDays) : false;
   const applySignal = /apply now|apply|submit (?:cv|resume)|careers portal|how to apply|send (?:your )?(?:cv|resume)/i.test(combinedText);
@@ -390,6 +393,7 @@ export class OpportunityHunter {
     if (!candidates.length) {
       return `No viable candidates were discovered for this objective. Strategy used: ${plan.mode}.`;
     }
+
 
     const toVerify = candidates.slice(0, Math.min(plan.verifyLimit, candidates.length));
     let verified = await Promise.all(toVerify.map((candidate) =>

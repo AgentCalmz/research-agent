@@ -299,9 +299,22 @@ const PLAN_TOOL = {
       candidate_limit: { type: 'integer', minimum: 10, maximum: 60 },
       verify_limit: { type: 'integer', minimum: 4, maximum: 20 },
       freshness_days: { type: 'integer', minimum: 1, maximum: 3650 },
-      verification_depth: { type: 'string', enum: ['quick', 'standard', 'deep'] }
+      verification_depth: { type: 'string', enum: ['quick', 'standard', 'deep'] },
+      requested_count: { type: 'integer', minimum: 1, maximum: 100 }
     },
     required: ['mode']
+  }
+} as const;
+
+const REFINE_TOOL = {
+  name: 'request_more_discovery',
+  description: 'Request up to three new search angles only when the first pass did not produce enough strong opportunities.',
+  parameters: {
+    type: 'object',
+    properties: {
+      queries: { type: 'array', items: { type: 'string' }, minItems: 1, maxItems: 3 }
+    },
+    required: ['queries']
   }
 } as const;
 
@@ -317,6 +330,8 @@ function sanitizePlan(request: string, args: Record<string, unknown>): ResearchP
   const verificationDepth = args.verification_depth === 'quick' || args.verification_depth === 'deep' || args.verification_depth === 'standard'
     ? args.verification_depth
     : fallback.verificationDepth;
+  const requestedCount = Number(args.requested_count);
+  const safeVerifyLimit = mode === 'jobs' ? 8 : 6;
   return {
     mode,
     location,
@@ -324,10 +339,11 @@ function sanitizePlan(request: string, args: Record<string, unknown>): ResearchP
     categories,
     queries: buildQueries({ mode, location, roles, categories }).slice(0, mode === 'jobs' ? 6 : 6),
     candidateLimit: Number.isFinite(candidateLimit) ? Math.max(10, Math.min(60, Math.floor(candidateLimit))) : fallback.candidateLimit,
-    verifyLimit: Number.isFinite(verifyLimit) ? Math.max(4, Math.min(20, Math.floor(verifyLimit))) : fallback.verifyLimit,
+    verifyLimit: Number.isFinite(verifyLimit) ? Math.max(4, Math.min(safeVerifyLimit, Math.floor(verifyLimit))) : fallback.verifyLimit,
     sourceDomains: fallback.sourceDomains,
     freshnessDays: Number.isFinite(freshnessDays) ? Math.max(1, Math.min(3650, Math.floor(freshnessDays))) : fallback.freshnessDays,
-    verificationDepth
+    verificationDepth,
+    requestedCount: Number.isFinite(requestedCount) ? Math.max(1, Math.min(100, Math.floor(requestedCount))) : fallback.requestedCount
   };
 }
 
@@ -355,7 +371,7 @@ export class OpportunityHunter {
     }
 
     const toVerify = candidates.slice(0, Math.min(plan.verifyLimit, candidates.length));
-    const verified = await Promise.all(toVerify.map((candidate) =>
+    let verified = await Promise.all(toVerify.map((candidate) =>
       plan.mode === 'jobs'
         ? verifyJob(candidate, plan, this.search)
         : plan.mode === 'business_website_gap'
@@ -365,6 +381,41 @@ export class OpportunityHunter {
 
     candidates = [...verified, ...candidates.slice(toVerify.length)]
       .sort((a, b) => (b.score * b.confidence) - (a.score * a.confidence));
+
+    const strongTarget = Math.min(plan.requestedCount, 3);
+    const strongCount = verified.filter((candidate) => candidate.status === 'verified' && candidate.confidence >= 0.65 && candidate.score >= 5).length;
+
+    if (strongCount < strongTarget) {
+      const refineResponse = await this.brain.complete({
+        system: 'The first local discovery pass was weak. Request at most three genuinely different discovery queries. Do not repeat previous query wording.',
+        user: [
+          `Objective: ${request}`,
+          `Mode: ${plan.mode}`,
+          `Location: ${plan.location || '(not specified)'}`,
+          'Already found candidate names:',
+          candidates.slice(0, 8).map((candidate) => candidate.name).join(', ')
+        ].join('\\n'),
+        tools: [REFINE_TOOL]
+      });
+      const refineQueries = Array.isArray(refineResponse.toolCalls[0]?.arguments?.queries)
+        ? refineResponse.toolCalls[0]!.arguments.queries.filter((value): value is string => typeof value === 'string').slice(0, 3)
+        : [];
+      if (refineQueries.length) {
+        const extraResults = await parallelSearch(this.search, refineQueries, 6);
+        const existingKeys = new Set(candidates.map((candidate) => `${candidate.kind}|${normalizeText(candidate.name)}|${normalizeText(String(candidate.facts.company || ''))}|${normalizeText(candidate.location || '')}`));
+        const newCandidates = mergeCandidates(extraResults, plan.mode, plan.location)
+          .filter((candidate) => !existingKeys.has(`${candidate.kind}|${normalizeText(candidate.name)}|${normalizeText(String(candidate.facts.company || ''))}|${normalizeText(candidate.location || '')}`))
+          .slice(0, 2);
+        const extraVerified = await Promise.all(newCandidates.map((candidate) =>
+          plan.mode === 'jobs'
+            ? verifyJob(candidate, plan, this.search)
+            : verifyBusiness(candidate, plan, this.search)
+        ));
+        verified = [...verified, ...extraVerified];
+        candidates = [...verified, ...candidates.slice(toVerify.length), ...newCandidates.filter((candidate) => !extraVerified.some((item) => item.id === candidate.id))]
+          .sort((a, b) => (b.score * b.confidence) - (a.score * a.confidence));
+      }
+    }
 
     const opportunities: Opportunity[] = candidates
       .filter((candidate) => candidate.status !== 'rejected')

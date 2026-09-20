@@ -443,7 +443,7 @@ export class OpportunityHunter {
     }
 
     const opportunities: Opportunity[] = candidates
-      .filter((candidate) => candidate.status !== 'rejected')
+      .filter((candidate) => candidate.status === 'verified' && candidate.confidence >= 0.6)
       .slice(0, Math.min(20, candidates.length))
       .map((candidate) => ({
         id: candidate.id,
@@ -467,7 +467,7 @@ export class OpportunityHunter {
 
     const evidenceEnvelope = candidates.slice(0, 12).map(compactCandidate).join('\n');
     const finalResponse = await this.brain.complete({
-      system: `You are the final decision and synthesis brain. Do not invent missing facts. Use only the compact evidence envelope supplied below. Return useful, source-linked results. Distinguish verified facts from uncertain signals. For jobs, include application URLs when present. For business website-gap opportunities, explain why the evidence supports the digital gap and list public contact/source URLs.\n\nEvidence envelope:\n${evidenceEnvelope}`,
+      system: `You are the final decision and synthesis brain. Do not invent missing facts. Use only the compact evidence envelope supplied below. Return at most ${plan.requestedCount} opportunities. Prefer verified candidates; clearly label any uncertain candidate instead of presenting it as verified. For jobs, include employer, location, freshness, fit signals, and application/source URLs when present. For business website-gap opportunities, explain why the evidence supports the digital gap and list public contact/source URLs.\n\nEvidence envelope:\n${evidenceEnvelope}`,
       user: request,
       tools: []
     });

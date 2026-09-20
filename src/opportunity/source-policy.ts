@@ -15,7 +15,7 @@ const BUSINESS_INDEX_PATHS = [
 const JOB_LISTING_HOSTS = new Map<string, RegExp>([
   ['hotnigerianjobs.com', /\/hotjobs\/[^/]+/i],
   ['jobberman.com', /\/listings?\/[^/]+/i],
-  ['myjobmag.com', /\/job\/|\/job-opening|\/jobs\/[^/]+/i],
+  ['myjobmag.com', /\/job\/(?!category|search|browse)[^/]+|\/job-opening\/[^/]+/i],
   ['indeed.com', /\/viewjob\//i],
   ['linkedin.com', /\/jobs\/view\//i],
   // Jooble search/category pages are treated as indexes; require a concrete listing from other sources.

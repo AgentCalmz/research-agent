@@ -55,8 +55,15 @@ export function defaultPlan(request: string): ResearchPlan {
     verifyLimit: mode === 'jobs' ? 8 : 6,
     sourceDomains: mode === 'jobs' ? JOB_SOURCES : BUSINESS_SOURCE_HINTS,
     freshnessDays: mode === 'jobs' ? 30 : 180,
-    verificationDepth: 'standard'
+    verificationDepth: 'standard',
+    requestedCount: extractRequestedCount(request)
   };
+}
+
+function extractRequestedCount(request: string): number {
+  const match = request.match(/\\b(?:find|get|return|give me|top)\\s+(\\d{1,3})\\b/i);
+  const count = Number(match?.[1] ?? 10);
+  return Number.isFinite(count) ? Math.max(1, Math.min(100, Math.floor(count))) : 10;
 }
 
 function extractLocation(request: string): string | undefined {

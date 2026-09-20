@@ -124,15 +124,14 @@ export function buildQueries(input: { mode: HuntMode; location?: string; roles?:
     const skillHint = input.skills?.length ? input.skills.join(' ') : '';
     const preference = input.workPreference && input.workPreference !== 'any' ? input.workPreference : '';
     return [...new Set(roleTerms.flatMap((role) => [
-      `site:jobberman.com/listings ${role} ${location}`,
-      `site:hotnigerianjobs.com/hotjobs ${role} ${location}`,
-      `site:myjobmag.com/job ${role} ${location}`,
-      `site:ng.indeed.com/viewjob ${role} ${location}`,
-      `site:linkedin.com/jobs/view ${role} ${location}`,
-      `site:jobs.leep.gov.ng ${role} ${location}`,
+      `site:jobberman.com ${role} ${location}`,
+      `site:hotnigerianjobs.com ${role} ${location}`,
+      `site:myjobmag.com ${role} ${location}`,
+      `site:linkedin.com/jobs ${role} ${location}`,
+      `site:ng.indeed.com ${role} ${location}`,
       `${role} ${skillHint} hiring ${preference} ${location}`.replace(/\s+/g, ' ').trim(),
-      `${role} ${skillHint} ${preference} ${location}`.replace(/\s+/g, ' ').trim(),
-      `${role} ${skillHint} ${location} apply`
+      `site:jobs.leep.gov.ng ${role} ${location}`,
+      `${role} ${skillHint} ${preference} ${location} apply`.replace(/\s+/g, ' ').trim()
     ]))];  }
 
   if (input.mode === 'business_website_gap') {
@@ -185,6 +184,7 @@ export function candidateFromResult(result: SearchResult, mode: HuntMode, locati
 
 function cleanBusinessName(title: string): string {
   return title
+    .replace(/\s*\(@[^)]*\)?\s*$/i, '')
     .replace(/\s*[-|]\s*(?:Abuja|Abuja,?\s*Nigeria|Nigeria).*$/i, '')
     .replace(/\s*[-|]\s*Contact.*$/i, '')
     .replace(/\s*[-|]\s*(?:Instagram|Facebook|LinkedIn).*$/i, '')

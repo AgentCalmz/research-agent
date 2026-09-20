@@ -29,6 +29,7 @@ export type ResearchPlan = {
   sourceDomains: string[];
   freshnessDays: number;
   verificationDepth: 'quick' | 'standard' | 'deep';
+  requestedCount: number;
 };
 
 export type HuntResult = {

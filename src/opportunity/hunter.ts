@@ -33,29 +33,31 @@ function uniqueResults(results: SearchResult[]): SearchResult[] {
   return out;
 }
 
+function candidatesEquivalent(left: CandidateRecord, right: CandidateRecord): boolean {
+  if (left.kind !== right.kind) return false;
+  if (right.kind === 'job') {
+    const leftCompany = typeof left.facts.company === 'string' ? left.facts.company : '';
+    const rightCompany = typeof right.facts.company === 'string' ? right.facts.company : '';
+    const companyMatches = Boolean(leftCompany && rightCompany && normalizeText(leftCompany) === normalizeText(rightCompany));
+    return companyMatches
+      ? sameEntity({ name: left.name, location: left.location }, { name: right.name, location: right.location })
+      : Boolean(left.name && right.name && normalizeText(left.name) === normalizeText(right.name) && left.location === right.location);
+  }
+  return sameEntity(
+    { name: left.name, location: left.location, phone: typeof left.facts.phone === 'string' ? left.facts.phone : undefined },
+    { name: right.name, location: right.location }
+  );
+}
+
 function mergeCandidates(results: SearchResult[], mode: HuntMode, location?: string): CandidateRecord[] {
   const output: CandidateRecord[] = [];
   for (const result of uniqueResults(results)) {
     const base = candidateFromResult(result, mode, location);
     if (!base) continue;
     const candidate = base as Omit<CandidateRecord, 'id' | 'evidence' | 'status' | 'confidence' | 'score'>;
-    const existing = output.find((item) => {
-      if (item.kind !== candidate.kind) return false;
-      if (candidate.kind === 'job') {
-        const leftCompany = typeof item.facts.company === 'string' ? item.facts.company : '';
-        const rightCompany = typeof candidate.facts.company === 'string' ? candidate.facts.company : '';
-        const companyMatches = Boolean(leftCompany && rightCompany && normalizeText(leftCompany) === normalizeText(rightCompany));
-        return companyMatches
-          ? sameEntity({ name: item.name, location: item.location }, { name: candidate.name, location: candidate.location })
-          : Boolean(item.name && candidate.name && normalizeText(item.name) === normalizeText(candidate.name) && item.location === candidate.location);
-      }
-      return sameEntity(
-        { name: item.name, location: item.location, phone: typeof item.facts.phone === 'string' ? item.facts.phone : undefined },
-        { name: candidate.name, location: candidate.location }
-      );
-    });
+    const existing = output.find((item) => candidatesEquivalent(item, candidate as CandidateRecord));
     if (existing) {
-      existing.sources.push(result);
+      if (!existing.sources.some((source) => canonicalizeUrl(source.url) === canonicalizeUrl(result.url))) existing.sources.push(result);
       continue;
     }
     output.push({
@@ -66,6 +68,27 @@ function mergeCandidates(results: SearchResult[], mode: HuntMode, location?: str
       confidence: 0,
       score: 0
     });
+  }
+  return output;
+}
+
+function mergeCandidateLists(existingCandidates: CandidateRecord[], discoveredCandidates: CandidateRecord[]): CandidateRecord[] {
+  const output = [...existingCandidates];
+  for (const discovered of discoveredCandidates) {
+    const existing = output.find((candidate) => candidatesEquivalent(candidate, discovered));
+    if (!existing) {
+      output.push(discovered);
+      continue;
+    }
+    for (const source of discovered.sources) {
+      if (!existing.sources.some((current) => canonicalizeUrl(current.url) === canonicalizeUrl(source.url))) existing.sources.push(source);
+    }
+    for (const item of discovered.evidence) {
+      if (!existing.evidence.some((current) => current.source.url === item.source.url && current.claim === item.claim)) existing.evidence.push(item);
+    }
+    for (const [key, value] of Object.entries(discovered.facts)) {
+      if (existing.facts[key] === undefined && value !== undefined) existing.facts[key] = value;
+    }
   }
   return output;
 }
@@ -134,6 +157,19 @@ function extractCompany(text: string): string | undefined {
 }
 
 function extractDate(text: string): Date | undefined {
+  const relative = text.match(/\b(today|yesterday|\d+\s+(?:hours?|days?|weeks?|months?)\s+ago)\b/i)?.[1];
+  if (relative) {
+    const now = new Date();
+    const normalized = relative.toLowerCase();
+    if (normalized === 'today') return now;
+    if (normalized === 'yesterday') return new Date(now.getTime() - 86400000);
+    const amount = Number(normalized.match(/\d+/)?.[0] || 0);
+    if (normalized.includes('hour')) return new Date(now.getTime() - amount * 3600000);
+    if (normalized.includes('day')) return new Date(now.getTime() - amount * 86400000);
+    if (normalized.includes('week')) return new Date(now.getTime() - amount * 7 * 86400000);
+    if (normalized.includes('month')) return new Date(now.getTime() - amount * 30 * 86400000);
+  }
+
   const patterns = [
     /(?:posted|published|updated|date posted|closing date)\D{0,30}(\d{1,2}\s+[A-Za-z]{3,9}\s+202\d)/i,
     /\b(20\d{2}-\d{2}-\d{2})\b/,
@@ -219,7 +255,8 @@ async function verifyJob(candidate: CandidateRecord, plan: ResearchPlan, search:
       skillsMatch,
       preferenceMatch,
       experienceMatch,
-      excluded
+      excluded,
+      verifiedSourceCount: sources.length
     },
     evidence: evidenceItems,
     status: excluded ? 'rejected' : directListing && jobContentSignal && verifiedCompany ? 'verified' : 'uncertain',
@@ -316,7 +353,8 @@ async function verifyBusiness(candidate: CandidateRecord, plan: ResearchPlan, se
       phones: [...new Set(contactPhones)].join(', '),
       emails: [...new Set(contactEmails)].join(', '),
       socialOnly,
-      noIndependentWebsite
+      noIndependentWebsite,
+      verifiedSourceCount: sources.length
     },
     evidence: evidenceItems,
     status: noIndependentWebsite ? 'verified' : reachableIndependent ? 'rejected' : 'uncertain',
@@ -589,6 +627,8 @@ function renderCandidate(candidate: CandidateRecord, index: number, mode: HuntMo
 
 function renderToCheck(candidate: CandidateRecord, index: number, mode: HuntMode): string {
   const sourceUrls = [...new Set(candidate.sources.map((source) => source.url))].slice(0, 4);
+  const evidenceUrls = [...new Set(candidate.evidence.map((item) => item.source.url))].slice(0, 5);
+  const contacts = [candidate.facts.phones ? `Phones: ${candidate.facts.phones}` : '', candidate.facts.emails ? `Emails: ${candidate.facts.emails}` : ''].filter(Boolean);
   return [
     `### ${index}. ${candidate.title || candidate.name}`,
     mode === 'jobs' ? `Company: ${candidate.facts.company || 'Not verified'}` : `Business: ${candidate.name}`,
@@ -596,8 +636,10 @@ function renderToCheck(candidate: CandidateRecord, index: number, mode: HuntMode
     `Reason: ${reasonForToCheck(candidate, mode)}`,
     `Opportunity score: ${candidate.score}/10`,
     `Confidence: ${Math.round(candidate.confidence * 100)}%`,
+    ...contacts,
     `Source: ${candidate.sourceUrl}`,
-    sourceUrls.length ? `Other sources: ${sourceUrls.join(' | ')}` : ''
+    sourceUrls.length ? `Other sources: ${sourceUrls.join(' | ')}` : '',
+    evidenceUrls.length ? `Evidence: ${evidenceUrls.join(' | ')}` : ''
   ].filter(Boolean).join('\n');
 }
 
@@ -641,12 +683,11 @@ export class OpportunityHunter {
       for (const query of activeQueries) searchedQueries.add(query);
 
       const beforeCount = candidates.length;
+      const beforeSourceCount = candidates.reduce((total, candidate) => total + candidate.sources.length, 0);
       if (activeQueries.length) {
         const discovery = await parallelSearch(this.search, activeQueries, MAX_DISCOVERY_RESULTS_PER_QUERY);
         const discovered = mergeCandidates(discovery, plan.mode, plan.location);
-        const existingKeys = new Set(candidates.map(candidateKey));
-        const freshCandidates = discovered.filter((candidate) => !existingKeys.has(candidateKey(candidate)));
-        candidates = [...candidates, ...freshCandidates].slice(0, plan.candidateLimit);
+        candidates = mergeCandidateLists(candidates, discovered).slice(0, plan.candidateLimit);
       }
 
       const eligibleBeforeVerify = candidates.filter((candidate) => isEligibleCandidate(candidate, plan.mode)).length;
@@ -657,7 +698,12 @@ export class OpportunityHunter {
 
       const verificationBatchLimit = plan.mode === 'jobs' ? 5 : 4;
       const toVerify = candidates
-        .filter((candidate) => candidate.status === 'discovered' || candidate.status === 'uncertain')
+        .filter((candidate) => {
+          if (candidate.status === 'discovered') return true;
+          if (candidate.status !== 'uncertain') return false;
+          const lastVerifiedSourceCount = Number(candidate.facts.verifiedSourceCount);
+          return !Number.isFinite(lastVerifiedSourceCount) || candidate.sources.length > lastVerifiedSourceCount;
+        })
         .sort((a, b) => (b.score * b.confidence) - (a.score * a.confidence))
         .slice(0, verificationBatchLimit);
 
@@ -679,7 +725,8 @@ export class OpportunityHunter {
       }
 
       const gainedCandidates = candidates.length - beforeCount;
-      const gainedEvidence = toVerify.length > 0;
+      const afterSourceCount = candidates.reduce((total, candidate) => total + candidate.sources.length, 0);
+      const gainedEvidence = afterSourceCount > beforeSourceCount;
       if (gainedCandidates === 0 && !gainedEvidence) noProgressRounds += 1;
       else noProgressRounds = 0;
 

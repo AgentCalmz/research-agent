@@ -15,3 +15,10 @@ test('merges obvious duplicate entity names', () => {
 test('removes tracking parameters from source URLs', () => {
   assert.equal(canonicalizeUrl('https://example.com/shop?utm_source=x&ref=abc#top'), 'https://example.com/shop');
 });
+
+test('unwraps DuckDuckGo redirects before deduplication', () => {
+  assert.equal(
+    canonicalizeUrl('https://duckduckgo.com/l/?uddg=https%3A%2F%2Fexample.com%2Fbusiness&rut=abc'),
+    'https://example.com/business'
+  );
+});

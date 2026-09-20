@@ -89,3 +89,14 @@ export function looksLikeIndependentBusinessSite(url: string): boolean {
   return !isSocialUrl(url) && !isDirectoryUrl(url) && !isEditorialUrl(url) &&
     !/google\.|bing\.|duckduckgo\.|youtube\.|wikipedia\./i.test(hostOf(url));
 }
+
+export function isLikelyJobListing(url: string, title = '', snippet = ''): boolean {
+  if (isJobProfileUrl(url) || isJobIndexUrl(url)) return false;
+  if (isJobListingUrl(url)) return true;
+  const text = normalizeText(`${title} ${snippet}`);
+  const hasJobSignal = /\b(job|jobs|vacancy|vacancies|position|role|hiring|recruiting|recruitment|apply|career|careers)\b/.test(text);
+  const hasEmployerSignal = /\b(?:at|for|with)\s+[a-z0-9]/.test(text) || /\brecruiting\b/.test(text);
+  const profileSignal = /\b(engineer|developer|designer|consultant|freelancer|portfolio|about me|my profile)\b/.test(text) &&
+    /\b(i am|years? experience|my work|portfolio)\b/.test(text);
+  return hasJobSignal && hasEmployerSignal && !profileSignal;
+}

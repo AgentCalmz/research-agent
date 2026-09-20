@@ -294,14 +294,14 @@ async function verifyBusiness(candidate: CandidateRecord, plan: ResearchPlan, se
       noIndependentWebsite
     },
     evidence: evidenceItems,
-    status: reachableIndependent ? 'verified' : noIndependentWebsite ? 'verified' : 'uncertain',
-    confidence: Math.min(1, reachableIndependent ? 0.95 : noIndependentWebsite ? 0.7 : 0.45),
+    status: noIndependentWebsite ? 'verified' : reachableIndependent ? 'rejected' : 'uncertain',
+    confidence: noIndependentWebsite ? 0.7 : reachableIndependent ? 0 : 0.45,
     score
   };
 }
 
 function renderDeterministicResults(candidates: CandidateRecord[], mode: HuntMode, requestedCount: number): string {
-  const verified = candidates.filter((candidate) => candidate.status === 'verified' && candidate.confidence >= 0.6).slice(0, Math.min(requestedCount, 20));
+  const verified = candidates.filter((candidate) => isEligibleCandidate(candidate, mode)).slice(0, Math.min(requestedCount, 20));
   if (!verified.length) {
     return [
       '## Result: insufficient verified evidence — objective not met',
@@ -335,6 +335,11 @@ function renderDeterministicResults(candidates: CandidateRecord[], mode: HuntMod
   ].join('\n\n');
 }
 
+function isEligibleCandidate(candidate: CandidateRecord, mode: HuntMode): boolean {
+  if (candidate.status !== 'verified' || candidate.confidence < 0.6) return false;
+  if (mode === 'business_website_gap') return candidate.facts.noIndependentWebsite === true && !candidate.facts.matchedWebsiteUrl;
+  return true;
+}
 function compactCandidate(candidate: CandidateRecord): string {
   return JSON.stringify({
     id: candidate.id,
@@ -461,7 +466,7 @@ export class OpportunityHunter {
       .sort((a, b) => (b.score * b.confidence) - (a.score * a.confidence));
 
     const strongTarget = Math.min(plan.requestedCount, 3);
-    const strongCount = verified.filter((candidate) => candidate.status === 'verified' && candidate.confidence >= 0.65 && candidate.score >= 5).length;
+    const strongCount = verified.filter((candidate) => isEligibleCandidate(candidate, plan.mode) && candidate.score >= 5).length;
 
     if (strongCount < strongTarget) {
       const refineResponse = await this.brain.complete({
@@ -495,8 +500,12 @@ export class OpportunityHunter {
       }
     }
 
-    const opportunities: Opportunity[] = candidates
-      .filter((candidate) => candidate.status === 'verified' && candidate.confidence >= 0.6)
+    const eligibleCandidates = candidates.filter((candidate) => isEligibleCandidate(candidate, plan.mode));
+    if (!eligibleCandidates.length) {
+      return renderDeterministicResults(candidates, plan.mode, plan.requestedCount);
+    }
+
+    const opportunities: Opportunity[] = eligibleCandidates
       .slice(0, Math.min(20, candidates.length))
       .map((candidate) => ({
         id: candidate.id,
@@ -519,7 +528,7 @@ export class OpportunityHunter {
     await Promise.all(opportunities.slice(0, Math.min(plan.requestedCount, 20)).map((opportunity) => this.store.save(opportunity)));
 
     const envelopeLimit = Math.min(20, Math.max(8, plan.requestedCount * 2));
-    const evidenceEnvelope = candidates.slice(0, envelopeLimit).map(compactCandidate).join('\n');
+    const evidenceEnvelope = eligibleCandidates.slice(0, envelopeLimit).map(compactCandidate).join('\n');
     const finalResponse = await this.brain.complete({
       system: `You are the final decision and synthesis brain. Do not invent missing facts. Use only the compact evidence envelope supplied below. Return at most ${plan.requestedCount} opportunities. Prefer verified candidates; clearly label any uncertain candidate instead of presenting it as verified. For jobs, include employer, location, freshness, fit signals, and application/source URLs when present. For business website-gap opportunities, explain why the evidence supports the digital gap and list public contact/source URLs.\n\nEvidence envelope:\n${evidenceEnvelope}`,
       user: request,

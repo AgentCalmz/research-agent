@@ -48,7 +48,7 @@ export function canonicalizeUrl(url: string): string {
     }
     parsed.hash = '';
     for (const key of [...parsed.searchParams.keys()]) {
-      if (/^(utm_|fbclid|gclid|ref|source|rut)$/i.test(key)) parsed.searchParams.delete(key);
+      if (/^(utm_|fbclid|gclid|ref|source|rut)/i.test(key)) parsed.searchParams.delete(key);
     }
     return parsed.toString().replace(/\/$/, '');
   } catch {

@@ -73,7 +73,8 @@ function extractRequestedCount(request: string): number {
 
 function extractSkills(request: string): string[] {
   const match = request.match(/\b(?:skills?|technology|stack|using)\s*[:\-]?\s*([^.!?]+)/i);
-  return match ? match[1].split(/,|\s+and\s+/i).map((v) => v.trim()).filter(Boolean).slice(0, 8) : [];
+  const value = match?.[1];
+  return value ? value.split(/,|\s+and\s+/i).map((v) => v.trim()).filter(Boolean).slice(0, 8) : [];
 }
 
 function extractExperienceLevel(request: string): string | undefined {
@@ -101,7 +102,8 @@ function extractLocation(request: string): string | undefined {
 
 function extractRoles(request: string): string[] {
   const match = request.match(/\b(?:for|as)\s+(.+?)(?:\s+in\s+|\s+around\s+|\s+near\s+|\.|$)/i);
-  return match ? match[1].split(/\s+or\s+|\s*,\s*/i).map((v) => v.trim()).filter(Boolean).slice(0, 5) : [];
+  const value = match?.[1];
+  return value ? value.split(/\s+or\s+|\s*,\s*/i).map((v) => v.trim()).filter(Boolean).slice(0, 5) : [];
 }
 
 function extractCategories(request: string): string[] {
@@ -109,7 +111,8 @@ function extractCategories(request: string): string[] {
   if (!match) return [];
   const before = request.slice(0, match.index ?? 0);
   const categoryMatch = before.match(/(?:find|discover|list)\s+(.+?)\s+(?:businesses|companies|shops|stores|restaurants|salons|hotels|clinics|agencies)$/i);
-  return categoryMatch ? [categoryMatch[1].trim()] : [];
+  const value = categoryMatch?.[1];
+  return value ? [value.trim()] : [];
 }
 
 export function buildQueries(input: { mode: HuntMode; location?: string; roles?: string[]; skills?: string[]; categories?: string[]; workPreference?: 'remote' | 'hybrid' | 'onsite' | 'any' }): string[] {
@@ -188,6 +191,11 @@ function extractJobName(title: string): string {
   return title
     .replace(/\s+(?:at|@)\s+[^|–—-]+$/i, '')
     .trim();
+}
+
+function extractJobCompany(title: string): string | undefined {
+  const match = title.match(/\s+(?:at|@)\s+([^|–—-]+)$/i);
+  return match?.[1]?.trim();
 }
 
 export { JOB_SOURCES, BUSINESS_SOURCE_HINTS };

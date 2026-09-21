@@ -758,7 +758,11 @@ function renderToCheck(candidate: CandidateRecord, index: number, mode: HuntMode
 
 function isEligibleCandidate(candidate: CandidateRecord, mode: HuntMode): boolean {
   if (candidate.status !== 'verified' || candidate.confidence < 0.6) return false;
-  if (mode === 'business_website_gap') return candidate.facts.noIndependentWebsite === true && !candidate.facts.matchedWebsiteUrl;
+  if (mode === 'business_website_gap') {
+    return candidate.facts.noIndependentWebsite === true
+      && !candidate.facts.matchedWebsiteUrl
+      && candidate.facts.publicContact === true;
+  }
   return true;
 }
 export class OpportunityHunter {
@@ -904,6 +908,9 @@ export class OpportunityHunter {
 
     const toCheck = candidates.filter((candidate) => candidate.status === 'uncertain' && candidate.confidence >= 0.35).slice(0, 8);
     const envelopeCandidates = [...eligibleCandidates.slice(0, plan.requestedCount), ...toCheck].slice(0, 16);
+    if (!envelopeCandidates.length) {
+      return renderDeterministicResults(candidates, plan.mode, plan.requestedCount, rounds, exhaustedReason);
+    }
     const evidenceEnvelope = envelopeCandidates.map(compactCandidate).join('\n');
     const finalResponse = await brainCompleteWithRetry(this.brain, {
       system: `You are the final synthesis brain. Use only the supplied evidence envelope. Never invent facts. The research engine has already enforced objective-specific verification. Return up to ${plan.requestedCount} verified opportunities when available. If fewer than requested were verified, explicitly keep the remaining credible near-misses in a separate 'To check' section; never promote them to verified. Include direct URLs and public contacts only when present in evidence.\n\nEvidence envelope:\n${evidenceEnvelope}` ,

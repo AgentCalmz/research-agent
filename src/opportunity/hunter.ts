@@ -157,34 +157,46 @@ function extractCompany(text: string): string | undefined {
 }
 
 function extractDate(text: string): Date | undefined {
-  const relative = text.match(/\b(today|yesterday|\d+\s+(?:hours?|days?|weeks?|months?)\s+ago)\b/i)?.[1];
+  const normalized = text.replace(/\s+/g, ' ');
+
+  const relative = normalized.match(/\b(?:posted|published)\s*:?\s*(today|yesterday|\d+\s+(?:hours?|days?|weeks?|months?)\s+ago)\b/i)?.[1];
   if (relative) {
     const now = new Date();
-    const normalized = relative.toLowerCase();
-    if (normalized === 'today') return now;
-    if (normalized === 'yesterday') return new Date(now.getTime() - 86400000);
-    const amount = Number(normalized.match(/\d+/)?.[0] || 0);
-    if (normalized.includes('hour')) return new Date(now.getTime() - amount * 3600000);
-    if (normalized.includes('day')) return new Date(now.getTime() - amount * 86400000);
-    if (normalized.includes('week')) return new Date(now.getTime() - amount * 7 * 86400000);
-    if (normalized.includes('month')) return new Date(now.getTime() - amount * 30 * 86400000);
+    const value = relative.toLowerCase();
+    if (value === 'today') return now;
+    if (value === 'yesterday') return new Date(now.getTime() - 86400000);
+    const amount = Number(value.match(/\d+/)?.[0] || 0);
+    if (value.includes('hour')) return new Date(now.getTime() - amount * 3600000);
+    if (value.includes('day')) return new Date(now.getTime() - amount * 86400000);
+    if (value.includes('week')) return new Date(now.getTime() - amount * 7 * 86400000);
+    if (value.includes('month')) return new Date(now.getTime() - amount * 30 * 86400000);
   }
 
-  const patterns = [
-    /(?:posted|published|updated|date posted|closing date)\D{0,30}(\d{1,2}\s+[A-Za-z]{3,9}\s+202\d)/i,
-    /\b(20\d{2}-\d{2}-\d{2})\b/,
-    /\b([A-Za-z]{3,9}\s+\d{1,2},\s+20\d{2})\b/
+  const labeledPatterns = [
+    /\b(?:posted|published)\s*:?\s*(\d{1,2}\s+[A-Za-z]{3,9}\s+20\d{2})/i,
+    /\b(?:posted|published)\s*:?\s*([A-Za-z]{3,9}\s+\d{1,2},\s+20\d{2})/i,
+    /\b(?:posted|published)\s*:?\s*(20\d{2}-\d{2}-\d{2})/i,
+    /\b(?:date posted|publication date)\s*:?\s*(\d{1,2}\s+[A-Za-z]{3,9}\s+20\d{2})/i,
+    /\b(?:date posted|publication date)\s*:?\s*([A-Za-z]{3,9}\s+\d{1,2},\s+20\d{2})/i
   ];
-  for (const pattern of patterns) {
-    const match = text.match(pattern);
+
+  for (const pattern of labeledPatterns) {
+    const match = normalized.match(pattern);
     if (match?.[1]) {
       const date = new Date(match[1]);
       if (!Number.isNaN(date.getTime())) return date;
     }
   }
+
   return undefined;
 }
 
+function extractJobLocation(text: string): string | undefined {
+  const match = text.match(/\b(?:location|locations?|job location)\s*:?\s*([A-Za-z][A-Za-z0-9 ,&/()'–—-]{2,80}?)(?=\s+(?:job field|job type|qualification|experience|deadline|method of application|requirements|responsibilities|salary|method of application)\b|[.;]|$)/i);
+  if (match?.[1]) return match[1].replace(/\s+/g, ' ').trim();
+  const remote = text.match(/\b(?:location|work location)\s*:?\s*((?:fully\s+)?remote(?:\s+in\s+Nigeria)?|Nigeria(?:\s+remote)?)\b/i)?.[1];
+  return remote?.trim();
+}
 function scoreJob(candidate: CandidateRecord, sourceCount: number, fresh: boolean, hasApply: boolean, roleMatch: boolean, skillsMatch: boolean, preferenceMatch: boolean, experienceMatch: boolean): number {
   let score = 3.5;
   if (sourceCount >= 2) score += 1.5;
@@ -230,7 +242,9 @@ async function verifyJob(candidate: CandidateRecord, plan: ResearchPlan, search:
   const companyLooksLikeUiText = typeof cleanedCompany === 'string' && /\b(hired in|sign up|similar job alerts|today|rest of nigeria)\b/i.test(cleanedCompany);
   const verifiedCompany = companyLooksLikeUiText ? undefined : cleanedCompany;
   const postedAt = extractDate(combinedText);
-  const fresh = postedAt ? ((Date.now() - postedAt.getTime()) / 86400000 <= plan.freshnessDays) : false;
+  const ageDays = postedAt ? (Date.now() - postedAt.getTime()) / 86400000 : undefined;
+  const fresh = ageDays !== undefined && ageDays >= 0 && ageDays <= plan.freshnessDays;
+  const jobLocation = extractJobLocation(combinedText);
   const applySignal = /apply now|apply|submit (?:cv|resume)|careers portal|how to apply|send (?:your )?(?:cv|resume)/i.test(combinedText);
   const jobContacts = extractContacts(combinedText);
   const directListing = isLikelyJobListing(candidate.sourceUrl, candidate.title || candidate.name, candidate.sources[0]?.snippet);
@@ -241,7 +255,14 @@ async function verifyJob(candidate: CandidateRecord, plan: ResearchPlan, search:
   const normalizedEvidence = normalizeText(combinedText);
   const roleMatch = roleTokens.length > 0 && roleTokens.filter((token) => normalizedJob.includes(token) || normalizedEvidence.includes(token)).length / roleTokens.length >= 0.5;
   const skillsMatch = skillTokens.length > 0 && skillTokens.filter((token) => normalizedJob.includes(token) || normalizedEvidence.includes(token)).length / skillTokens.length >= 0.5;
-  const preferenceMatch = plan.workPreference === 'any' || normalizedEvidence.includes(plan.workPreference || '') || normalizedJob.includes(plan.workPreference || '');
+  const remoteSignal = /\b(?:remote|work from home|fully remote)\b/i.test(normalizedEvidence) || /\b(?:remote|work from home|fully remote)\b/i.test(normalizedJob);
+  const requestedAbuja = /\babuja\b/i.test(plan.location || '');
+  const jobIsAbuja = /\babuja\b/i.test(jobLocation || '');
+  const preferenceMatch = plan.workPreference === 'any'
+    || (plan.workPreference === 'remote' && remoteSignal)
+    || (plan.workPreference === 'hybrid' && /\bhybrid\b/i.test(normalizedEvidence))
+    || (plan.workPreference === 'onsite' && /\bon[- ]site\b/i.test(normalizedEvidence))
+    || (requestedAbuja && jobIsAbuja);
   const experienceMatch = !plan.experienceLevel || normalizedEvidence.includes(normalizeText(plan.experienceLevel)) || normalizedJob.includes(normalizeText(plan.experienceLevel));
   const excluded = plan.excludeTerms.some((term) => normalizedJob.includes(normalizeText(term)) || normalizedEvidence.includes(normalizeText(term)));
   const distinctListingHosts = new Set(listingSources.map((result) => hostOf(result.url)).filter(Boolean));
@@ -252,11 +273,13 @@ async function verifyJob(candidate: CandidateRecord, plan: ResearchPlan, search:
 
   return {
     ...candidate,
+    location: jobLocation || candidate.location,
     sources: listingSources,
     facts: {
       ...candidate.facts,
       company: verifiedCompany,
       postedAt: postedAt?.toISOString(),
+      jobLocation,
       hasApply: applySignal,
       phones: jobContacts.phones.join(', '),
       emails: jobContacts.emails.join(', '),
@@ -269,7 +292,13 @@ async function verifyJob(candidate: CandidateRecord, plan: ResearchPlan, search:
       verifiedSourceHosts: distinctListingHosts.size
     },
     evidence: evidenceItems,
-    status: excluded ? 'rejected' : directListing && jobContentSignal && verifiedCompany ? 'verified' : 'uncertain',
+    status: excluded
+      ? 'rejected'
+      : directListing && jobContentSignal && verifiedCompany && fresh
+        ? 'verified'
+        : postedAt && !fresh
+          ? 'rejected'
+          : 'uncertain',
     confidence: excluded
       ? 0
       : Math.min(
@@ -310,7 +339,7 @@ async function verifyBusiness(candidate: CandidateRecord, plan: ResearchPlan, se
   for (const source of sources) {
     const text = `${source.title} ${source.snippet || ''}`;
     if (isSocialUrl(source.url)) socialUrls.push(source.url);
-    if (isDirectoryUrl(source.url) || isEditorialUrl(source.url)) listingUrls.push(source.url);
+    if (isDirectoryUrl(source.url)) listingUrls.push(source.url);
     if (nameMatch(name, text) >= 0.45) {
       const contacts = extractContacts(text);
       if (contacts.phones.length || contacts.emails.length) publicContact = true;
@@ -327,29 +356,45 @@ async function verifyBusiness(candidate: CandidateRecord, plan: ResearchPlan, se
     .slice(0, 2);
   const websiteTargetSet = new Set(websiteFetchTargets.map((result) => result.url));
 
-  for (const result of sources.slice(0, 15)) {
-    const genericPage = /top\s+\d+|best\s+\d+|without websites|businesses without websites|directory|category|list of|ranked/i.test(result.title || '') ||
-      /without websites|directory|category|list of|ranked/i.test(result.snippet || '');
-    if (genericPage || !looksLikeIndependentWebsite(result.url) || !websiteTargetSet.has(result.url)) continue;
+  const verificationTargets = [
+    ...sources.filter((result) => isDirectoryUrl(result.url)).slice(0, 1),
+    ...sources.filter((result) => isSocialUrl(result.url)).slice(0, 1),
+    ...sources
+      .filter((result) => !/top\s+\d+|best\s+\d+|without websites|businesses without websites|directory|category|list of|ranked/i.test(result.title || ''))
+      .filter((result) => looksLikeIndependentWebsite(result.url))
+      .filter((result) => websiteTargetSet.has(result.url))
+      .slice(0, 2)
+  ];
 
-    independentCandidateUrls.push(result.url);
+  const fetched = new Set<string>();
+  for (const result of verificationTargets) {
+    if (fetched.has(result.url)) continue;
+    fetched.add(result.url);
+    const kind = sourceKind(result.url);
+
     try {
       const response = await fetchText(result.url);
       const html = await response.text();
-      const text = cleanHtml(html, 6000);
-      combinedText += ` ${text}`;
-      const contacts = extractContacts(text);
-      if (contacts.phones.length || contacts.emails.length) publicContact = true;
-      contactPhones.push(...contacts.phones);
-      contactEmails.push(...contacts.emails);
-      if (response.ok && nameMatch(name, text) >= 0.55) {
-        reachableIndependent = true;
-        matchedWebsiteUrl = response.url;
-        evidenceItems.push(evidence(response.url, 'website', 'A reachable page matches the candidate business name strongly enough to count as an independent-site signal.', text.slice(0, 280), 0.9));
+      const text = cleanHtml(html, kind === 'website' ? 6000 : 5000);
+      if (kind === 'directory' || kind === 'social' || nameMatch(name, text) >= 0.35) {
+        combinedText += ` ${text}`;
+        const contacts = extractContacts(text);
+        if (contacts.phones.length || contacts.emails.length) publicContact = true;
+        contactPhones.push(...contacts.phones);
+        contactEmails.push(...contacts.emails);
+
+        if (kind === 'website' && response.ok && nameMatch(name, text) >= 0.55) {
+          reachableIndependent = true;
+          matchedWebsiteUrl = response.url;
+          evidenceItems.push(evidence(response.url, 'website', 'A reachable page matches the candidate business name strongly enough to count as an independent-site signal.', text.slice(0, 280), 0.9));
+        } else if (kind === 'directory' && nameMatch(name, text) >= 0.3) {
+          evidenceItems.push(evidence(response.url, 'directory', 'A public business directory page was reachable and matched the candidate identity.', text.slice(0, 280), 0.8));
+        }
       }
     } catch {
       // Unreachable/blocked pages are not treated as proof of absence.
     }
+
     if (matchedWebsiteUrl) break;
   }
 

@@ -4,7 +4,7 @@ import type { SearchProvider, SearchResult } from '../discovery/search.js';
 import { cleanHtml, fetchText, getRequestCount } from '../runtime/http.js';
 import { OpportunityStore } from '../runtime/store.js';
 import { canonicalizeUrl, hostOf, normalizeText, sameEntity } from './entities.js';
-import { isJobListingUrl, isLikelyJobListing, looksLikeIndependentBusinessSite } from './source-policy.js';
+import { isDirectoryUrl, isEditorialUrl, isJobListingUrl, isLikelyJobListing, looksLikeIndependentBusinessSite, isSocialUrl } from './source-policy.js';
 import { candidateFromResult, defaultPlan, buildQueries } from './strategies.js';
 import type { CandidateRecord, HuntMode, ResearchPlan } from './types.js';
 
@@ -199,20 +199,21 @@ function scoreJob(candidate: CandidateRecord, sourceCount: number, fresh: boolea
 }
 
 async function verifyJob(candidate: CandidateRecord, plan: ResearchPlan, search: SearchProvider): Promise<CandidateRecord> {
-  const query = `"${candidate.title || candidate.name}" ${candidate.facts.company ? `"${candidate.facts.company}" ` : ''}${plan.location || ''}`;
-  const results = await parallelSearch(search, [query], 6);
-  const sources = uniqueResults([...candidate.sources, ...results]);
+  const query = \`"\${candidate.title || candidate.name}" \${candidate.facts.company ? \`"\${candidate.facts.company}" \` : ''}\${plan.location || ''}\`;
+  const results = await parallelSearch(search, [query], 8);
+  const listingResults = results.filter((result) => isLikelyJobListing(result.url, result.title, result.snippet));
+  const sources = uniqueResults([...candidate.sources, ...listingResults]);
+  const listingSources = sources.filter((result) => isLikelyJobListing(result.url, result.title, result.snippet));
   const evidenceItems = [...candidate.evidence];
-  let combinedText = sources.map((result) => result.snippet || '').join(' ');
+  let combinedText = listingSources.map((result) => result.snippet || '').join(' ');
 
-  const fetchTargets = sources.filter((result) => isLikelyJobListing(result.url, result.title, result.snippet)).slice(0, 1);
-
+  const fetchTargets = listingSources.slice(0, 2);
   for (const result of fetchTargets) {
     try {
       const response = await fetchText(result.url);
       const html = await response.text();
       const text = cleanHtml(html, 7000);
-      combinedText += ` ${text}`;
+      combinedText += \` \${text}\`;
       evidenceItems.push(evidence(response.url, sourceKind(response.url), 'Job listing page was reachable.', text.slice(0, 280), 0.8));
     } catch {
       // Search evidence remains usable when a page blocks fetching.
@@ -220,8 +221,14 @@ async function verifyJob(candidate: CandidateRecord, plan: ResearchPlan, search:
   }
 
   const company = candidate.facts.company || extractCompany(combinedText) || extractCompany(candidate.title || candidate.name);
-  const companyLooksLikeUiText = typeof company === 'string' && /\b(hired in|sign up|similar job alerts|today|rest of nigeria)\b/i.test(company);
-  const verifiedCompany = companyLooksLikeUiText ? undefined : company;
+  const cleanedCompany = typeof company === 'string'
+    ? company
+        .replace(/\s*,\s*(?:Jan(?:uary)?|Feb(?:ruary)?|Mar(?:ch)?|Apr(?:il)?|May|Jun(?:e)?|Jul(?:y)?|Aug(?:ust)?|Sep(?:tember)?|Oct(?:ober)?|Nov(?:ember)?|Dec(?:ember)?)\s+20\d{2}\s*$/i, '')
+        .replace(/\s+\d{4}\s*$/i, '')
+        .trim()
+    : undefined;
+  const companyLooksLikeUiText = typeof cleanedCompany === 'string' && /\b(hired in|sign up|similar job alerts|today|rest of nigeria)\b/i.test(cleanedCompany);
+  const verifiedCompany = companyLooksLikeUiText ? undefined : cleanedCompany;
   const postedAt = extractDate(combinedText);
   const fresh = postedAt ? ((Date.now() - postedAt.getTime()) / 86400000 <= plan.freshnessDays) : false;
   const applySignal = /apply now|apply|submit (?:cv|resume)|careers portal|how to apply|send (?:your )?(?:cv|resume)/i.test(combinedText);
@@ -237,13 +244,15 @@ async function verifyJob(candidate: CandidateRecord, plan: ResearchPlan, search:
   const preferenceMatch = plan.workPreference === 'any' || normalizedEvidence.includes(plan.workPreference || '') || normalizedJob.includes(plan.workPreference || '');
   const experienceMatch = !plan.experienceLevel || normalizedEvidence.includes(normalizeText(plan.experienceLevel)) || normalizedJob.includes(normalizeText(plan.experienceLevel));
   const excluded = plan.excludeTerms.some((term) => normalizedJob.includes(normalizeText(term)) || normalizedEvidence.includes(normalizeText(term)));
-  if (verifiedCompany) evidenceItems.push(evidence(candidate.sourceUrl, 'search', `Employer identified as ${verifiedCompany}.`, undefined, 0.8));
-  if (fresh) evidenceItems.push(evidence(candidate.sourceUrl, 'search', `Posting appears within the requested ${plan.freshnessDays}-day freshness window.`, undefined, 0.8));
+  const distinctListingHosts = new Set(listingSources.map((result) => hostOf(result.url)).filter(Boolean));
+  if (verifiedCompany) evidenceItems.push(evidence(candidate.sourceUrl, 'search', \`Employer identified as \${verifiedCompany}.\`, undefined, 0.8));
+  if (postedAt) evidenceItems.push(evidence(candidate.sourceUrl, 'search', \`Posting date identified as \${postedAt.toISOString().slice(0, 10)}.\`, undefined, fresh ? 0.85 : 0.65));
+  if (fresh) evidenceItems.push(evidence(candidate.sourceUrl, 'search', \`Posting appears within the requested \${plan.freshnessDays}-day freshness window.\`, undefined, 0.8));
   if (applySignal) evidenceItems.push(evidence(candidate.sourceUrl, 'website', 'Page contains an application signal.', undefined, 0.75));
 
   return {
     ...candidate,
-    sources,
+    sources: listingSources,
     facts: {
       ...candidate.facts,
       company: verifiedCompany,
@@ -256,57 +265,79 @@ async function verifyJob(candidate: CandidateRecord, plan: ResearchPlan, search:
       preferenceMatch,
       experienceMatch,
       excluded,
-      verifiedSourceCount: sources.length
+      verifiedSourceCount: listingSources.length,
+      verifiedSourceHosts: distinctListingHosts.size
     },
     evidence: evidenceItems,
     status: excluded ? 'rejected' : directListing && jobContentSignal && verifiedCompany ? 'verified' : 'uncertain',
-    confidence: excluded ? 0 : Math.min(1, 0.45 + (directListing && jobContentSignal ? 0.2 : 0) + Math.min(0.2, sources.length * 0.06) + (verifiedCompany ? 0.12 : 0) + (fresh ? 0.12 : 0) + (skillsMatch ? 0.08 : 0)),
-    score: excluded ? 0 : scoreJob(candidate, sources.length, fresh, applySignal, roleMatch, skillsMatch, preferenceMatch, experienceMatch)
+    confidence: excluded
+      ? 0
+      : Math.min(
+          0.95,
+          0.45 +
+          (directListing && jobContentSignal ? 0.2 : 0) +
+          Math.min(0.12, Math.max(0, distinctListingHosts.size - 1) * 0.06) +
+          (verifiedCompany ? 0.12 : 0) +
+          (fresh ? 0.1 : 0) +
+          (skillsMatch ? 0.05 : 0)
+        ),
+    score: excluded ? 0 : scoreJob(candidate, distinctListingHosts.size, fresh, applySignal, roleMatch, skillsMatch, preferenceMatch, experienceMatch)
   };
 }
-
 async function verifyBusiness(candidate: CandidateRecord, plan: ResearchPlan, search: SearchProvider): Promise<CandidateRecord> {
   const location = plan.location || '';
   const name = candidate.name;
   const queries = [
-    `"${name}" "${location}" official website phone`,
-    `"${name}" "${location}" Instagram OR Facebook`
+    \`"\${name}" "\${location}" contact phone address\`,
+    \`site:instagram.com "\${name}" "\${location}"\`,
+    \`site:facebook.com "\${name}" "\${location}"\`,
+    \`"\${name}" "\${location}" directory\`,
+    \`"\${name}" "\${location}" official website\`
   ];
   const results = await parallelSearch(search, queries, 5);
   const sources = uniqueResults([...candidate.sources, ...results]);
   const evidenceItems = [...candidate.evidence];
-  let socialUrls: string[] = [];
+  const socialUrls: string[] = [];
+  const listingUrls: string[] = [];
   let reachableIndependent = false;
   let independentCandidateUrls: string[] = [];
   let publicContact = false;
   let contactPhones: string[] = [];
   let contactEmails: string[] = [];
   let matchedWebsiteUrl: string | undefined;
-  let combinedText = sources.map((result) => result.snippet || '').join(' ');
-  const snippetContacts = extractContacts(combinedText);
-  if (snippetContacts.phones.length || snippetContacts.emails.length) publicContact = true;
-  contactPhones.push(...snippetContacts.phones);
-  contactEmails.push(...snippetContacts.emails);
+  let combinedText = '';
+
+  for (const source of sources) {
+    const text = \`\${source.title} \${source.snippet || ''}\`;
+    if (isSocialUrl(source.url)) socialUrls.push(source.url);
+    if (isDirectoryUrl(source.url) || isEditorialUrl(source.url)) listingUrls.push(source.url);
+    if (nameMatch(name, text) >= 0.45) {
+      const contacts = extractContacts(text);
+      if (contacts.phones.length || contacts.emails.length) publicContact = true;
+      contactPhones.push(...contacts.phones);
+      contactEmails.push(...contacts.emails);
+      combinedText += \` \${text}\`;
+    }
+  }
 
   const websiteFetchTargets = sources
-    .filter((result) => !/top\s+\d+|best\s+\d+|without websites|businesses without websites|directory|category|list of/i.test(result.title || ''))
+    .filter((result) => !/top\s+\d+|best\s+\d+|without websites|businesses without websites|directory|category|list of|ranked/i.test(result.title || ''))
     .filter((result) => looksLikeIndependentWebsite(result.url))
-    .sort((a, b) => nameMatch(name, `${b.title} ${b.snippet || ''}`) - nameMatch(name, `${a.title} ${a.snippet || ''}`))
+    .sort((a, b) => nameMatch(name, \`\${b.title} \${b.snippet || ''}\`) - nameMatch(name, \`\${a.title} \${a.snippet || ''}\`))
     .slice(0, 2);
   const websiteTargetSet = new Set(websiteFetchTargets.map((result) => result.url));
 
-  for (const result of sources.slice(0, 10)) {
-    const genericPage = /top\s+\d+|best\s+\d+|without websites|businesses without websites|directory|category|list of/i.test(result.title || '') ||
-      /without websites|directory|category|list of/i.test(result.snippet || '');
-    const kind = sourceKind(result.url);
-    if (kind === 'social') socialUrls.push(result.url);
+  for (const result of sources.slice(0, 15)) {
+    const genericPage = /top\s+\d+|best\s+\d+|without websites|businesses without websites|directory|category|list of|ranked/i.test(result.title || '') ||
+      /without websites|directory|category|list of|ranked/i.test(result.snippet || '');
     if (genericPage || !looksLikeIndependentWebsite(result.url) || !websiteTargetSet.has(result.url)) continue;
+
     independentCandidateUrls.push(result.url);
     try {
       const response = await fetchText(result.url);
       const html = await response.text();
       const text = cleanHtml(html, 6000);
-      combinedText += ` ${text}`;
+      combinedText += \` \${text}\`;
       const contacts = extractContacts(text);
       if (contacts.phones.length || contacts.emails.length) publicContact = true;
       contactPhones.push(...contacts.phones);
@@ -322,24 +353,36 @@ async function verifyBusiness(candidate: CandidateRecord, plan: ResearchPlan, se
     if (matchedWebsiteUrl) break;
   }
 
-  const sourceHosts = new Set(sources.map((result) => hostOf(result.url)).filter(Boolean));
-  const socialHosts = new Set(socialUrls.map((url) => hostOf(url)).filter(Boolean));
-  const nonSocialSourceHosts = new Set([...sourceHosts].filter((host) => !SOCIAL_HOSTS.has(host) && !/duckduckgo\\.|google\\.|bing\\./i.test(host)));
-  const socialOnly = socialUrls.length > 0 && !reachableIndependent;
-  const noIndependentWebsite = !reachableIndependent && socialOnly &&
-    (nonSocialSourceHosts.size >= 1 || (socialHosts.size >= 2 && publicContact));
+  const socialHostSet = new Set(socialUrls.map((url) => hostOf(url)).filter(Boolean));
+  const listingHostSet = new Set(listingUrls.map((url) => hostOf(url)).filter(Boolean));
+  const strongSocial = socialHostSet.size >= 1;
+  const strongListing = listingHostSet.size >= 1;
+  const multipleListingHosts = listingHostSet.size >= 2;
+  const twoSocialsWithContact = socialHostSet.size >= 2 && publicContact;
+  const noIndependentWebsite = !reachableIndependent && (
+    (strongSocial && strongListing) ||
+    multipleListingHosts ||
+    twoSocialsWithContact
+  );
 
-  if (socialOnly) evidenceItems.push(evidence(socialUrls[0]!, 'social', 'Public social presence discovered while no matching independent site was verified.', undefined, 0.75));
+  if (strongSocial) evidenceItems.push(evidence(socialUrls[0]!, 'social', 'Public social presence discovered while no matching independent site was verified.', undefined, 0.75));
   if (publicContact) evidenceItems.push(evidence(candidate.sourceUrl, 'directory', 'Public contact information was found during local verification.', undefined, 0.75));
-  if (nonSocialSourceHosts.size >= 1) evidenceItems.push(evidence(candidate.sourceUrl, 'search', 'Candidate is corroborated by at least one non-social public source.', undefined, 0.8));
+  if (strongListing) evidenceItems.push(evidence(listingUrls[0]!, 'search', 'Candidate is corroborated by a public directory or editorial source.', undefined, 0.8));
 
   const score = Math.min(10, Number((
     (noIndependentWebsite ? 4 : 0) +
-    (socialOnly ? 2 : 0) +
+    (strongSocial ? 2 : 0) +
     (publicContact ? 1.5 : 0) +
-    (nonSocialSourceHosts.size >= 1 ? 1.5 : 0) +
-    Math.min(1, nameMatch(name, combinedText))
+    (strongListing ? 1.5 : 0) +
+    (multipleListingHosts ? 0.5 : 0) +
+    Math.min(0.5, nameMatch(name, combinedText))
   ).toFixed(1)));
+
+  const confidence = noIndependentWebsite
+    ? Math.min(0.9, 0.55 + (strongSocial ? 0.1 : 0) + (strongListing ? 0.1 : 0) + (multipleListingHosts ? 0.08 : 0) + (publicContact ? 0.07 : 0))
+    : reachableIndependent
+      ? 0
+      : Math.min(0.7, 0.45 + (strongSocial ? 0.08 : 0) + (strongListing ? 0.08 : 0) + (publicContact ? 0.05 : 0));
 
   return {
     ...candidate,
@@ -352,17 +395,17 @@ async function verifyBusiness(candidate: CandidateRecord, plan: ResearchPlan, se
       publicContact,
       phones: [...new Set(contactPhones)].join(', '),
       emails: [...new Set(contactEmails)].join(', '),
-      socialOnly,
+      socialOnly: strongSocial && !reachableIndependent,
       noIndependentWebsite,
-      verifiedSourceCount: sources.length
+      verifiedSourceCount: sources.length,
+      verifiedSourceHosts: socialHostSet.size + listingHostSet.size
     },
     evidence: evidenceItems,
     status: noIndependentWebsite ? 'verified' : reachableIndependent ? 'rejected' : 'uncertain',
-    confidence: noIndependentWebsite ? 0.7 : reachableIndependent ? 0 : 0.45,
+    confidence,
     score
   };
 }
-
 function compactCandidate(candidate: CandidateRecord): string {
   return JSON.stringify({
     id: candidate.id,
@@ -614,7 +657,7 @@ function renderCandidate(candidate: CandidateRecord, index: number, mode: HuntMo
     `### ${index}. ${candidate.title || candidate.name}`,
     mode === 'jobs' ? `Company: ${facts.company || 'Not verified'}` : `Business: ${candidate.name}`,
     candidate.location ? `Location: ${candidate.location}` : '',
-    mode === 'jobs' ? `Freshness: ${facts.postedAt ? 'date identified' : 'not verified'}` : '',
+    mode === 'jobs' ? `Freshness: ${facts.postedAt ? `${String(facts.postedAt).slice(0, 10)}${facts.postedAt && (Date.now() - new Date(String(facts.postedAt)).getTime()) / 86400000 <= 30 ? ' (fresh)' : ' (older than requested window)'}` : 'not verified'}` : '',
     mode === 'jobs' ? `Fit signals: role=${facts.roleMatch ? 'match' : 'unknown'}, skills=${facts.skillsMatch ? 'match' : 'unknown'}, preference=${facts.preferenceMatch ? 'match' : 'unknown'}, experience=${facts.experienceMatch ? 'match' : 'unknown'}` : '',
     `Opportunity score: ${candidate.score}/10`,
     `Confidence: ${Math.round(candidate.confidence * 100)}%`,

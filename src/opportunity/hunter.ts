@@ -210,6 +210,28 @@ function scoreJob(candidate: CandidateRecord, sourceCount: number, fresh: boolea
   return Math.min(10, Number(score.toFixed(1)));
 }
 
+function extractApplicationUrl(html: string, baseUrl: string): string | undefined {
+  const matches = [...html.matchAll(/<a[^>]+href=["']([^"']+)["'][^>]*>([\s\S]*?)<\/a>/gi)];
+  const preferred = matches.find((match) => {
+    const label = cleanHtml(match[2] || '', 240);
+    return /\b(?:apply|application|apply now|submit application|careers)\b/i.test(label);
+  });
+  const fallback = matches.find((match) => {
+    const label = cleanHtml(match[2] || '', 240);
+    const href = match[1] || '';
+    return /\b(?:go to|company website|employer|official site)\b/i.test(label) && href;
+  });
+  const href = preferred?.[1] || fallback?.[1];
+  if (!href) return undefined;
+  try {
+    const url = new URL(href, baseUrl);
+    if (!/^https?:$/.test(url.protocol)) return undefined;
+    return canonicalizeUrl(url.toString());
+  } catch {
+    return undefined;
+  }
+}
+
 async function verifyJob(candidate: CandidateRecord, plan: ResearchPlan, search: SearchProvider): Promise<CandidateRecord> {
   const query = `"${candidate.title || candidate.name}" ${candidate.facts.company ? `"${candidate.facts.company}" ` : ''}${plan.location || ''}`;
   const results = await parallelSearch(search, [query], 8);
@@ -218,6 +240,7 @@ async function verifyJob(candidate: CandidateRecord, plan: ResearchPlan, search:
   const listingSources = sources.filter((result) => isLikelyJobListing(result.url, result.title, result.snippet));
   const evidenceItems = [...candidate.evidence];
   let combinedText = listingSources.map((result) => result.snippet || '').join(' ');
+  let applicationUrl: string | undefined;
 
   const fetchTargets = listingSources.slice(0, 2);
   for (const result of fetchTargets) {
@@ -226,6 +249,7 @@ async function verifyJob(candidate: CandidateRecord, plan: ResearchPlan, search:
       const html = await response.text();
       const text = cleanHtml(html, 7000);
       combinedText += ` ${text}`;
+      applicationUrl ||= extractApplicationUrl(html, response.url);
       evidenceItems.push(evidence(response.url, sourceKind(response.url), 'Job listing page was reachable.', text.slice(0, 280), 0.8));
     } catch {
       // Search evidence remains usable when a page blocks fetching.
@@ -281,6 +305,7 @@ async function verifyJob(candidate: CandidateRecord, plan: ResearchPlan, search:
       postedAt: postedAt?.toISOString(),
       jobLocation,
       hasApply: applySignal,
+      applicationUrl: applicationUrl || candidate.sourceUrl,
       phones: jobContacts.phones.join(', '),
       emails: jobContacts.emails.join(', '),
       roleMatch,
@@ -707,7 +732,7 @@ function renderCandidate(candidate: CandidateRecord, index: number, mode: HuntMo
     `Opportunity score: ${candidate.score}/10`,
     `Confidence: ${Math.round(candidate.confidence * 100)}%`,
     contacts.join(' | '),
-    mode === 'jobs' ? `Application/source: ${candidate.sourceUrl}` : `Source: ${candidate.sourceUrl}`,
+    mode === 'jobs' ? `Application URL: ${facts.applicationUrl || candidate.sourceUrl}` : `Source: ${candidate.sourceUrl}`,
     sourceUrls.length ? `Sources: ${sourceUrls.join(' | ')}` : '',
     evidenceUrls.length ? `Evidence: ${evidenceUrls.join(' | ')}` : ''
   ].filter(Boolean).join('\n');

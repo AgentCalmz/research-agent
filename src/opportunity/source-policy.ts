@@ -23,6 +23,7 @@ const JOB_LISTING_HOSTS = new Map<string, RegExp>([
 
 const PROFILE_HOSTS = /(^|\.)(linkedin\.com|upwork\.com)$/i;
 const SOCIAL_HOSTS = /(^|\.)(instagram\.com|facebook\.com|linkedin\.com|tiktok\.com|x\.com)$/i;
+const SEARCH_INFRA_HOSTS = /(^|\.)(google\.com|google\.ng|googleusercontent\.com|maps\.google\.com|bing\.com|duckduckgo\.com|yahoo\.com)$/i;
 const DIRECTORY_HOSTS = /(^|\.)(businesslist\.com\.ng|finelib\.com|yellowpages|connectciti\.com|foursquare\.com|tripadvisor\.|yelp\.|directory\.org\.ng|nigeriabusinessweb\.com|geoleadsweb\.com)$/i;
 const EDITORIAL_HOSTS = /(^|\.)(wakaabuja\.com|abujaeats\.com\.ng|ranked\.ng|abujabusinessnews\.com|sabiabuja\.com|whatsoninabuja\.com)$/i;
 
@@ -36,6 +37,11 @@ export function isDirectoryUrl(url: string): boolean {
 
 export function isEditorialUrl(url: string): boolean {
   return EDITORIAL_HOSTS.test(hostOf(url));
+}
+
+export function isSearchInfrastructureUrl(url: string): boolean {
+  const host = hostOf(url);
+  return SEARCH_INFRA_HOSTS.test(host) || /^maps\./i.test(host);
 }
 
 export function isJobProfileUrl(url: string): boolean {

@@ -199,7 +199,7 @@ function scoreJob(candidate: CandidateRecord, sourceCount: number, fresh: boolea
 }
 
 async function verifyJob(candidate: CandidateRecord, plan: ResearchPlan, search: SearchProvider): Promise<CandidateRecord> {
-  const query = \`"\${candidate.title || candidate.name}" \${candidate.facts.company ? \`"\${candidate.facts.company}" \` : ''}\${plan.location || ''}\`;
+  const query = `"${candidate.title || candidate.name}" ${candidate.facts.company ? `"${candidate.facts.company}" ` : ''}${plan.location || ''}`;
   const results = await parallelSearch(search, [query], 8);
   const listingResults = results.filter((result) => isLikelyJobListing(result.url, result.title, result.snippet));
   const sources = uniqueResults([...candidate.sources, ...listingResults]);
@@ -213,7 +213,7 @@ async function verifyJob(candidate: CandidateRecord, plan: ResearchPlan, search:
       const response = await fetchText(result.url);
       const html = await response.text();
       const text = cleanHtml(html, 7000);
-      combinedText += \` \${text}\`;
+      combinedText += ` ${text}`;
       evidenceItems.push(evidence(response.url, sourceKind(response.url), 'Job listing page was reachable.', text.slice(0, 280), 0.8));
     } catch {
       // Search evidence remains usable when a page blocks fetching.
@@ -245,9 +245,9 @@ async function verifyJob(candidate: CandidateRecord, plan: ResearchPlan, search:
   const experienceMatch = !plan.experienceLevel || normalizedEvidence.includes(normalizeText(plan.experienceLevel)) || normalizedJob.includes(normalizeText(plan.experienceLevel));
   const excluded = plan.excludeTerms.some((term) => normalizedJob.includes(normalizeText(term)) || normalizedEvidence.includes(normalizeText(term)));
   const distinctListingHosts = new Set(listingSources.map((result) => hostOf(result.url)).filter(Boolean));
-  if (verifiedCompany) evidenceItems.push(evidence(candidate.sourceUrl, 'search', \`Employer identified as \${verifiedCompany}.\`, undefined, 0.8));
-  if (postedAt) evidenceItems.push(evidence(candidate.sourceUrl, 'search', \`Posting date identified as \${postedAt.toISOString().slice(0, 10)}.\`, undefined, fresh ? 0.85 : 0.65));
-  if (fresh) evidenceItems.push(evidence(candidate.sourceUrl, 'search', \`Posting appears within the requested \${plan.freshnessDays}-day freshness window.\`, undefined, 0.8));
+  if (verifiedCompany) evidenceItems.push(evidence(candidate.sourceUrl, 'search', `Employer identified as ${verifiedCompany}.`, undefined, 0.8));
+  if (postedAt) evidenceItems.push(evidence(candidate.sourceUrl, 'search', `Posting date identified as ${postedAt.toISOString().slice(0, 10)}.`, undefined, fresh ? 0.85 : 0.65));
+  if (fresh) evidenceItems.push(evidence(candidate.sourceUrl, 'search', `Posting appears within the requested ${plan.freshnessDays}-day freshness window.`, undefined, 0.8));
   if (applySignal) evidenceItems.push(evidence(candidate.sourceUrl, 'website', 'Page contains an application signal.', undefined, 0.75));
 
   return {
@@ -288,11 +288,11 @@ async function verifyBusiness(candidate: CandidateRecord, plan: ResearchPlan, se
   const location = plan.location || '';
   const name = candidate.name;
   const queries = [
-    \`"\${name}" "\${location}" contact phone address\`,
-    \`site:instagram.com "\${name}" "\${location}"\`,
-    \`site:facebook.com "\${name}" "\${location}"\`,
-    \`"\${name}" "\${location}" directory\`,
-    \`"\${name}" "\${location}" official website\`
+    `"${name}" "${location}" contact phone address`,
+    `site:instagram.com "${name}" "${location}"`,
+    `site:facebook.com "${name}" "${location}"`,
+    `"${name}" "${location}" directory`,
+    `"${name}" "${location}" official website`
   ];
   const results = await parallelSearch(search, queries, 5);
   const sources = uniqueResults([...candidate.sources, ...results]);
@@ -308,7 +308,7 @@ async function verifyBusiness(candidate: CandidateRecord, plan: ResearchPlan, se
   let combinedText = '';
 
   for (const source of sources) {
-    const text = \`\${source.title} \${source.snippet || ''}\`;
+    const text = `${source.title} ${source.snippet || ''}`;
     if (isSocialUrl(source.url)) socialUrls.push(source.url);
     if (isDirectoryUrl(source.url) || isEditorialUrl(source.url)) listingUrls.push(source.url);
     if (nameMatch(name, text) >= 0.45) {
@@ -316,14 +316,14 @@ async function verifyBusiness(candidate: CandidateRecord, plan: ResearchPlan, se
       if (contacts.phones.length || contacts.emails.length) publicContact = true;
       contactPhones.push(...contacts.phones);
       contactEmails.push(...contacts.emails);
-      combinedText += \` \${text}\`;
+      combinedText += ` ${text}`;
     }
   }
 
   const websiteFetchTargets = sources
     .filter((result) => !/top\s+\d+|best\s+\d+|without websites|businesses without websites|directory|category|list of|ranked/i.test(result.title || ''))
     .filter((result) => looksLikeIndependentWebsite(result.url))
-    .sort((a, b) => nameMatch(name, \`\${b.title} \${b.snippet || ''}\`) - nameMatch(name, \`\${a.title} \${a.snippet || ''}\`))
+    .sort((a, b) => nameMatch(name, `${b.title} ${b.snippet || ''}`) - nameMatch(name, `${a.title} ${a.snippet || ''}`))
     .slice(0, 2);
   const websiteTargetSet = new Set(websiteFetchTargets.map((result) => result.url));
 
@@ -337,7 +337,7 @@ async function verifyBusiness(candidate: CandidateRecord, plan: ResearchPlan, se
       const response = await fetchText(result.url);
       const html = await response.text();
       const text = cleanHtml(html, 6000);
-      combinedText += \` \${text}\`;
+      combinedText += ` ${text}`;
       const contacts = extractContacts(text);
       if (contacts.phones.length || contacts.emails.length) publicContact = true;
       contactPhones.push(...contacts.phones);

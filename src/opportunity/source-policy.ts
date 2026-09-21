@@ -82,7 +82,7 @@ export function isBusinessCandidateUrl(url: string): boolean {
 
 export function isSearchNoise(title: string, snippet = ''): boolean {
   const text = normalizeText(`${title} ${snippet}`);
-  return /\b(top \d+|best \d+|\d+\s+(?:trendy|best|top)|list of|directory|category|city guide|popular|without websites|businesses without websites|how to|guide|ranked|review of|my experience|find best|eat and drink|remote jobs?|jobs? in [a-z ]+$|job board|job listings?|search jobs|job alerts?|sign up for similar job alerts)\b/.test(text);
+  return /\b(top \d+|best \d+|\d+\s+(?:trendy|best|top)|list of|directory|category|city guide|popular|without websites|businesses without websites|how to|guide|ranked|review of|my experience|find best|eat and drink|find trusted businesses near you|trusted businesses near you|remote jobs?|jobs? in [a-z ]+$|job board|job listings?|search jobs|job alerts?|sign up for similar job alerts)\b/.test(text);
 }
 export function looksLikeIndependentBusinessSite(url: string): boolean {
   return !isSocialUrl(url) && !isDirectoryUrl(url) && !isEditorialUrl(url) &&

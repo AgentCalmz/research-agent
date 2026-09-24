@@ -100,14 +100,32 @@ function mergeCandidateLists(existingCandidates: CandidateRecord[], discoveredCa
 }
 
 async function parallelSearch(search: SearchProvider, queries: string[], limit: number): Promise<SearchResult[]> {
-  const results = await Promise.all(queries.map(async (query) => {
+  const coverage = await Promise.all(queries.map(async (query) => {
     try {
-      return await search.search(query, limit);
+      return { ok: true, results: await search.search(query, limit) };
     } catch {
-      return [];
+      return { ok: false, results: [] as SearchResult[] };
     }
   }));
-  return uniqueResults(results.flat());
+  return uniqueResults(coverage.flatMap((item) => item.results));
+}
+
+async function parallelSearchWithCoverage(
+  search: SearchProvider,
+  queries: string[],
+  limit: number
+): Promise<{ results: SearchResult[]; successfulQueries: number }> {
+  const coverage = await Promise.all(queries.map(async (query) => {
+    try {
+      return { ok: true, results: await search.search(query, limit) };
+    } catch {
+      return { ok: false, results: [] as SearchResult[] };
+    }
+  }));
+  return {
+    results: uniqueResults(coverage.flatMap((item) => item.results)),
+    successfulQueries: coverage.filter((item) => item.ok).length
+  };
 }
 
 function sourceKind(url: string): Evidence['source']['sourceType'] {
@@ -394,10 +412,14 @@ async function verifyBusiness(candidate: CandidateRecord, plan: ResearchPlan, se
     `"${name}" "${location}" contact`
   ];
 
-  const [websiteResults, corroborationResults] = await Promise.all([
-    parallelSearch(search, websiteQueries, 8),
-    parallelSearch(search, corroborationQueries, 8)
+  const [websiteSweep, corroborationSweep] = await Promise.all([
+    parallelSearchWithCoverage(search, websiteQueries, 8),
+    parallelSearchWithCoverage(search, corroborationQueries, 8)
   ]);
+  const websiteResults = websiteSweep.results;
+  const corroborationResults = corroborationSweep.results;
+  const successfulWebsiteQueries = websiteSweep.successfulQueries;
+  const successfulCorroborationQueries = corroborationSweep.successfulQueries;
   const results = uniqueResults([...candidate.sources, ...websiteResults, ...corroborationResults]);
   const evidenceItems = [...candidate.evidence];
 
@@ -568,7 +590,8 @@ async function verifyBusiness(candidate: CandidateRecord, plan: ResearchPlan, se
   // universal proof of absence. We require several independent website-search
   // angles, no credible matched site, and corroborated identity/contact data.
   const noWebsiteSignal = !reachableIndependent
-    && websiteQueries.length >= 4
+    && successfulWebsiteQueries >= 3
+    && successfulCorroborationQueries >= 2
     && hasIndependentCorroboration
     && publicContact;
 
@@ -606,7 +629,7 @@ async function verifyBusiness(candidate: CandidateRecord, plan: ResearchPlan, se
 
   evidenceItems.push(
     evidence(seedProfile, 'directory',
-      `Website absence sweep completed across ${websiteQueries.length} targeted search angle(s); ${websiteTargets.length} candidate website URL(s) were directly checked.`,
+      `Website absence sweep completed across ${successfulWebsiteQueries} successful search angle(s); ${websiteTargets.length} candidate website URL(s) were directly checked.`,
       undefined,
       noWebsiteSignal ? 0.84 : 0.65
     )
@@ -653,7 +676,8 @@ async function verifyBusiness(candidate: CandidateRecord, plan: ResearchPlan, se
       independentCorroboration: hasIndependentCorroboration,
       independentSourceCount,
       websiteChecks: websiteTargets.length,
-      websiteSearchAngles: websiteQueries.length,
+      websiteSearchAngles: successfulWebsiteQueries,
+      corroborationSearchAngles: successfulCorroborationQueries,
       matchedIdentitySourceCount: matchedIdentityUrls.size
     },
     evidence: evidenceItems,

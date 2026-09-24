@@ -130,8 +130,20 @@ function extractRoles(request: string): string[] {
 function extractCategories(request: string): string[] {
   const match = request.match(/\b(?:find|discover|list|bring|get|check)\s+(?:\d+\s+|(?:like|about|around)\s+[a-z-]+\s+)?(?:(.+?)\s+)?(real estate agents|estate agents|agents|brokers|businesses|companies|shops|stores|restaurants|salons|hotels|clinics|agencies)\b/i);
   if (!match?.[2]) return [];
-  const modifier = match[1]?.trim();
-  return [modifier ? `${modifier} ${match[2]}` : match[2]];
+
+  const category = match[2].trim();
+  const rawModifier = match[1]?.trim() || '';
+  const modifier = rawModifier
+    .replace(/https?:\/\/[^\s]+/gi, ' ')
+    .replace(/^.*\b(?:and|with|that|who|which)\s+/i, '')
+    .replace(/\s+/g, ' ')
+    .trim();
+
+  if (!modifier || /https?:\/\//i.test(rawModifier) && modifier.length > 24 || /^(?:bring|find|check|get|return)\b/i.test(modifier)) {
+    return [category];
+  }
+
+  return [`${modifier} ${category}`];
 }
 
 

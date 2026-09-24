@@ -541,7 +541,7 @@ function sanitizePlan(request: string, args: Record<string, unknown>): ResearchP
   const excludeTerms = Array.isArray(args.exclude_terms) ? args.exclude_terms.filter((v): v is string => typeof v === 'string').slice(0, 8) : fallback.excludeTerms;
   const requestedCount = Number(args.requested_count);
   const explicitSourceUrls = Array.isArray(args.source_urls)
-    ? args.source_urls.filter((value): value is string => typeof value === 'string' && /^https?:\\/\\//i.test(value)).slice(0, 5)
+    ? args.source_urls.filter((value): value is string => typeof value === 'string' && /^https?:\/\//i.test(value)).slice(0, 5)
     : [];
   const sourceUrls = explicitSourceUrls.length ? explicitSourceUrls : extractSeedUrls(request);
   const sourceLocation = sourceUrls.map(inferLocationFromSourceUrl).find(Boolean);

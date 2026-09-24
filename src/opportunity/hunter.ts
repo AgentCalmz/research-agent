@@ -6,6 +6,7 @@ import { OpportunityStore } from '../runtime/store.js';
 import { canonicalizeUrl, hostOf, normalizeText, sameEntity } from './entities.js';
 import { isDirectoryUrl, isEditorialUrl, isJobListingUrl, isLikelyJobListing, looksLikeIndependentBusinessSite, isSocialUrl } from './source-policy.js';
 import { candidateFromResult, defaultPlan, buildQueries } from './strategies.js';
+import { discoverFromSeedUrls, extractSeedUrls, inferLocationFromSourceUrl } from './seed-source.js';
 import type { CandidateRecord, HuntMode, ResearchPlan } from './types.js';
 
 const MAX_DISCOVERY_RESULTS_PER_QUERY = 8;
@@ -342,13 +343,9 @@ async function verifyBusiness(candidate: CandidateRecord, plan: ResearchPlan, se
   const location = plan.location || '';
   const name = candidate.name;
   const queries = [
-    `"${name}" "${location}" contact phone address`,
-    `site:instagram.com "${name}" "${location}"`,
-    `site:facebook.com "${name}" "${location}"`,
-    `"${name}" "${location}" directory`,
-    `"${name}" "${location}" official website`
+    `"${name}" "${location}" website Instagram Facebook phone contact`
   ];
-  const results = await parallelSearch(search, queries, 5);
+  const results = await parallelSearch(search, queries, 8);
   const sources = uniqueResults([...candidate.sources, ...results]);
   const evidenceItems = [...candidate.evidence];
   const socialUrls: string[] = [];
@@ -378,18 +375,10 @@ async function verifyBusiness(candidate: CandidateRecord, plan: ResearchPlan, se
     .filter((result) => !/top\s+\d+|best\s+\d+|without websites|businesses without websites|directory|category|list of|ranked/i.test(result.title || ''))
     .filter((result) => looksLikeIndependentWebsite(result.url))
     .sort((a, b) => nameMatch(name, `${b.title} ${b.snippet || ''}`) - nameMatch(name, `${a.title} ${a.snippet || ''}`))
-    .slice(0, 2);
-  const websiteTargetSet = new Set(websiteFetchTargets.map((result) => result.url));
+    .slice(0, 1);
 
-  const verificationTargets = [
-    ...sources.filter((result) => isDirectoryUrl(result.url)).slice(0, 1),
-    ...sources.filter((result) => isSocialUrl(result.url)).slice(0, 1),
-    ...sources
-      .filter((result) => !/top\s+\d+|best\s+\d+|without websites|businesses without websites|directory|category|list of|ranked/i.test(result.title || ''))
-      .filter((result) => looksLikeIndependentWebsite(result.url))
-      .filter((result) => websiteTargetSet.has(result.url))
-      .slice(0, 2)
-  ];
+  const verificationTargets = websiteFetchTargets.slice(0, 1);
+  independentCandidateUrls = websiteFetchTargets.map((result) => result.url);
 
   const fetched = new Set<string>();
   for (const result of verificationTargets) {
@@ -510,7 +499,8 @@ const PLAN_TOOL = {
       experience_level: { type: 'string' },
       work_preference: { type: 'string', enum: ['remote', 'hybrid', 'onsite', 'any'] },
       exclude_terms: { type: 'array', items: { type: 'string' }, maxItems: 8 },
-      requested_count: { type: 'integer', minimum: 1, maximum: 100 }
+      requested_count: { type: 'integer', minimum: 1, maximum: 100 },
+      source_urls: { type: 'array', items: { type: 'string' }, maxItems: 5 }
     },
     required: ['mode']
   }
@@ -545,17 +535,24 @@ function sanitizePlan(request: string, args: Record<string, unknown>): ResearchP
   const workPreference = args.work_preference === 'remote' || args.work_preference === 'hybrid' || args.work_preference === 'onsite' || args.work_preference === 'any' ? args.work_preference : fallback.workPreference;
   const excludeTerms = Array.isArray(args.exclude_terms) ? args.exclude_terms.filter((v): v is string => typeof v === 'string').slice(0, 8) : fallback.excludeTerms;
   const requestedCount = Number(args.requested_count);
+  const explicitSourceUrls = Array.isArray(args.source_urls)
+    ? args.source_urls.filter((value): value is string => typeof value === 'string' && /^https?:\\/\\//i.test(value)).slice(0, 5)
+    : [];
+  const sourceUrls = explicitSourceUrls.length ? explicitSourceUrls : extractSeedUrls(request);
+  const sourceLocation = sourceUrls.map(inferLocationFromSourceUrl).find(Boolean);
+  const finalLocation = location || sourceLocation;
   const safeVerifyLimit = mode === 'jobs' ? 8 : 6;
   return {
     mode,
-    location,
+    location: finalLocation,
+    sourceUrls,
     roles,
     skills,
     categories,
     experienceLevel,
     workPreference,
     excludeTerms,
-    queries: buildQueries({ mode, location, roles, skills, categories, workPreference }).slice(0, 6),
+    queries: buildQueries({ mode, location: finalLocation, roles, skills, categories, workPreference }).slice(0, 6),
     candidateLimit: Number.isFinite(candidateLimit) ? Math.max(10, Math.min(60, Math.floor(candidateLimit))) : fallback.candidateLimit,
     verifyLimit: Number.isFinite(verifyLimit) ? Math.max(4, Math.min(safeVerifyLimit, Math.floor(verifyLimit))) : fallback.verifyLimit,
     sourceDomains: fallback.sourceDomains,
@@ -781,6 +778,18 @@ export class OpportunityHunter {
 
     const plan = sanitizePlan(request, planResponse?.toolCalls[0]?.arguments ?? {});
     let candidates: CandidateRecord[] = [];
+
+    // When the user supplies a source URL, enumerate that source first. Do not reduce it to a search hint.
+    if (plan.sourceUrls.length) {
+      const seededResults = await discoverFromSeedUrls(
+        plan.sourceUrls,
+        Math.min(plan.candidateLimit, Math.max(plan.requestedCount * 3, 30)),
+        4
+      );
+      const seededCandidates = mergeCandidates(seededResults, plan.mode, plan.location);
+      candidates = mergeCandidateLists(candidates, seededCandidates).slice(0, plan.candidateLimit);
+    }
+
     let queryQueue = [...new Set([...plan.queries, ...fallbackResearchQueries(plan, 0)])];
     const searchedQueries = new Set<string>();
     let noProgressRounds = 0;

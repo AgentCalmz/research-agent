@@ -4,7 +4,7 @@ export type SearchResult = {
   title: string;
   url: string;
   snippet?: string;
-  source: 'duckduckgo' | 'searxng';
+  source: 'duckduckgo' | 'searxng' | 'seed';
 };
 
 export interface SearchProvider {

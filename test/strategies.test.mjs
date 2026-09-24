@@ -71,6 +71,14 @@ test('accepts a concrete HotNigerianJobs listing', () => {
   assert.equal(result?.facts.company, 'SwiftLink Global Services Limited');
 });
 
+test('understands approximate word counts and explicit source URL location', () => {
+  const plan = defaultPlan('check https://nigeriapropertycentre.com/agents?search=abuja and bring like twenty agents that do not have their own website');
+  assert.equal(plan.requestedCount, 20);
+  assert.equal(plan.location, 'abuja');
+  assert.deepEqual(plan.sourceUrls, ['https://nigeriapropertycentre.com/agents?search=abuja']);
+  assert.equal(plan.categories[0], 'agents');
+});
+
 test('default plan keeps verification bounded', () => {
   const plan = defaultPlan('Find businesses in Abuja without websites');
   assert.equal(plan.verifyLimit <= 6, true);

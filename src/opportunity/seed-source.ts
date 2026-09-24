@@ -124,7 +124,7 @@ export async function discoverFromSeedUrls(
       const pageResults = seedCandidatesFromHtml(response.url, html);
 
       for (const item of pageResults) {
-        const key = item.url.split('#')[0];
+        const key = item.url.split('#')[0] ?? item.url;
         if (seenCandidates.has(key)) continue;
         seenCandidates.add(key);
         results.push(item);

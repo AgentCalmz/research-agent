@@ -13,7 +13,7 @@ function decodeHtml(value: string): string {
 
 function extractLinks(html: string, baseUrl: string): Array<{ href: string; text: string; index: number }> {
   const out: Array<{ href: string; text: string; index: number }> = [];
-  const re = /<a\b[^>]*href=["']([^"']+)["'][^>]*>([\\s\\S]*?)<\\/a>/gi;
+  const re = /<a\b[^>]*href=["']([^"']+)["'][^>]*>([\s\S]*?)<\/a>/gi;
   for (const match of html.matchAll(re)) {
     const href = match[1];
     const rawText = match[2];
@@ -29,8 +29,8 @@ function extractLinks(html: string, baseUrl: string): Array<{ href: string; text
 }
 
 function nearbyText(html: string, index: number): string {
-  const start = Math.max(0, index - 900);
-  const end = Math.min(html.length, index + 1500);
+  const start = Math.max(0, index - 550);
+  const end = Math.min(html.length, index + 900);
   return cleanHtml(decodeHtml(html.slice(start, end)), 1200);
 }
 
@@ -77,7 +77,7 @@ function seedCandidatesFromHtml(pageUrl: string, html: string): SearchResult[] {
 }
 
 export function extractSeedUrls(request: string): string[] {
-  const matches = request.match(/https?:\\/\\/[^\\s"'<>]+/gi) ?? [];
+  const matches = request.match(/https?:\/\/[^\s"'<>]+/gi) ?? [];
   return [...new Set(matches.map((value) => value.replace(/[),.;!?]+$/, '')))];
 }
 
@@ -85,9 +85,9 @@ export function inferLocationFromSourceUrl(url: string): string | undefined {
   try {
     const parsed = new URL(url);
     const queryValue = parsed.searchParams.get('search') || parsed.searchParams.get('location') || parsed.searchParams.get('city');
-    if (queryValue?.trim()) return queryValue.trim().replace(/\\+/g, ' ');
+    if (queryValue?.trim()) return queryValue.trim().replace(/\+/g, ' ');
     const path = decodeURIComponent(parsed.pathname);
-    const match = path.match(/\\/(abuja|lagos|ibadan|enugu|kaduna|kano|jos|port-harcourt)\\b/i);
+    const match = path.match(/\/(abuja|lagos|ibadan|enugu|kaduna|kano|jos|port-harcourt)\b/i);
     return match?.[1];
   } catch {
     return undefined;

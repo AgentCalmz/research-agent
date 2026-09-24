@@ -38,10 +38,20 @@ function isLikelyProfilePath(pathname: string): boolean {
   return /\/(?:agents?|companies?|business(?:es)?|brokers?|profiles?)\/[^/?#]+/i.test(pathname);
 }
 
-function isNextPageLink(link: { href: string; text: string }, origin: string): boolean {
+function isNextPageLink(link: { href: string; text: string }, origin: string, currentUrl: string): boolean {
   try {
     const parsed = new URL(link.href);
-    return parsed.origin === origin && /^(?:next|next page|>|›)$/i.test(link.text.trim());
+    if (parsed.origin !== origin) return false;
+    if (/^(?:next|next page|>|›)$/i.test(link.text.trim())) return true;
+
+    const current = new URL(currentUrl);
+    const candidatePage = Number(parsed.searchParams.get('page') || parsed.searchParams.get('p') || '');
+    const currentPage = Number(current.searchParams.get('page') || current.searchParams.get('p') || '1');
+    if (Number.isFinite(candidatePage) && Number.isFinite(currentPage) && candidatePage === currentPage + 1) return true;
+
+    const candidateOffset = Number(parsed.searchParams.get('offset') || parsed.searchParams.get('start') || '');
+    const currentOffset = Number(current.searchParams.get('offset') || current.searchParams.get('start') || '0');
+    return Number.isFinite(candidateOffset) && Number.isFinite(currentOffset) && candidateOffset > currentOffset;
   } catch {
     return false;
   }
@@ -134,7 +144,7 @@ export async function discoverFromSeedUrls(
       if (results.length >= maxCandidates) break;
 
       const links = extractLinks(html, response.url);
-      const next = links.find((link) => isNextPageLink(link, origin));
+      const next = links.find((link) => isNextPageLink(link, origin, response.url));
       if (!next) break;
       currentUrl = next.href;
     }

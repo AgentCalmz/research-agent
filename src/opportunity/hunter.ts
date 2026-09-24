@@ -3,7 +3,7 @@ import type { BrainProvider, Evidence, Opportunity } from '../core/types.js';
 import type { SearchProvider, SearchResult } from '../discovery/search.js';
 import { cleanHtml, fetchText, getRequestCount } from '../runtime/http.js';
 import { OpportunityStore } from '../runtime/store.js';
-import { canonicalizeUrl, hostOf, normalizeText, sameEntity } from './entities.js';
+import { canonicalizeUrl, hostOf, normalizePhone, normalizeText, sameEntity } from './entities.js';
 import { isDirectoryUrl, isEditorialUrl, isJobListingUrl, isLikelyJobListing, looksLikeIndependentBusinessSite, isSocialUrl } from './source-policy.js';
 import { candidateFromResult, defaultPlan, buildQueries } from './strategies.js';
 import { discoverFromSeedUrls, extractSeedUrls, inferLocationFromSourceUrl } from './seed-source.js';
@@ -100,14 +100,32 @@ function mergeCandidateLists(existingCandidates: CandidateRecord[], discoveredCa
 }
 
 async function parallelSearch(search: SearchProvider, queries: string[], limit: number): Promise<SearchResult[]> {
-  const results = await Promise.all(queries.map(async (query) => {
+  const coverage = await Promise.all(queries.map(async (query) => {
     try {
-      return await search.search(query, limit);
+      return { ok: true, results: await search.search(query, limit) };
     } catch {
-      return [];
+      return { ok: false, results: [] as SearchResult[] };
     }
   }));
-  return uniqueResults(results.flat());
+  return uniqueResults(coverage.flatMap((item) => item.results));
+}
+
+async function parallelSearchWithCoverage(
+  search: SearchProvider,
+  queries: string[],
+  limit: number
+): Promise<{ results: SearchResult[]; successfulQueries: number }> {
+  const coverage = await Promise.all(queries.map(async (query) => {
+    try {
+      return { ok: true, results: await search.search(query, limit) };
+    } catch {
+      return { ok: false, results: [] as SearchResult[] };
+    }
+  }));
+  return {
+    results: uniqueResults(coverage.flatMap((item) => item.results)),
+    successfulQueries: coverage.filter((item) => item.ok).length
+  };
 }
 
 function sourceKind(url: string): Evidence['source']['sourceType'] {
@@ -369,136 +387,173 @@ async function verifyJob(candidate: CandidateRecord, plan: ResearchPlan, search:
   };
 }
 async function verifyBusiness(candidate: CandidateRecord, plan: ResearchPlan, search: SearchProvider): Promise<CandidateRecord> {
-  const location = plan.location || '';
-  const name = candidate.name;
-  const seedProfile = candidate.sourceUrl;
+  const location = plan.location?.trim() || '';
+  const name = candidate.name.trim();
+  const seedProfile = canonicalizeUrl(candidate.sourceUrl);
   const seedHost = hostOf(seedProfile);
 
-  const seedSnippetText = candidate.sources
-    .filter((source) => source.source === 'seed' || hostOf(source.url) === seedHost)
-    .map((source) => `${source.title} ${source.snippet || ''}`)
+  const seedSourceText = candidate.sources
+    .filter((source) => canonicalizeUrl(source.url) === seedProfile || hostOf(source.url) === seedHost)
+    .map((source) => `${source.title || ''} ${source.snippet || ''}`)
     .join(' ');
-  const seedContacts = extractContacts(seedSnippetText);
-  const seedPhone = seedContacts.phones[0];
 
-  const queries = [
+  const seedContacts = extractContacts(seedSourceText);
+  const knownPhones = [...seedContacts.phones];
+
+  const websiteQueries = [
     `"${name}" "${location}" website`,
-    `"${name}" "${location}" Instagram OR Facebook`,
-    seedPhone ? `"${name}" "${seedPhone}"` : `"${name}" "${location}" phone address`
+    `"${name}" "${location}" "official website"`,
+    knownPhones[0] ? `"${name}" "${knownPhones[0]}" website` : `"${name}" "${location}" domain`,
+    knownPhones[0] ? `"${knownPhones[0]}" website` : `"${name}" "${location}" "www."`
   ];
-  const results = await parallelSearch(search, queries, 8);
-  const sources = uniqueResults([...candidate.sources, ...results]);
+  const corroborationQueries = [
+    `"${name}" "${location}" Instagram OR Facebook`,
+    knownPhones[0] ? `"${name}" "${knownPhones[0]}"` : `"${name}" "${location}" phone address`,
+    `"${name}" "${location}" contact`
+  ];
+
+  const [websiteSweep, corroborationSweep] = await Promise.all([
+    parallelSearchWithCoverage(search, websiteQueries, 8),
+    parallelSearchWithCoverage(search, corroborationQueries, 8)
+  ]);
+  const websiteResults = websiteSweep.results;
+  const corroborationResults = corroborationSweep.results;
+  const successfulWebsiteQueries = websiteSweep.successfulQueries;
+  const successfulCorroborationQueries = corroborationSweep.successfulQueries;
+  const results = uniqueResults([...candidate.sources, ...websiteResults, ...corroborationResults]);
   const evidenceItems = [...candidate.evidence];
 
   const socialUrls = new Set<string>();
   const directoryUrls = new Set<string>();
   const otherWebUrls = new Set<string>();
+  const candidateWebsiteUrls = new Set<string>();
+  const matchedIdentityUrls = new Set<string>();
   const outboundWebsiteUrls = new Set<string>();
-  const candidateWebsiteUrls: string[] = [];
 
   let reachableIndependent = false;
   let matchedWebsiteUrl: string | undefined;
   let publicContact = seedContacts.phones.length > 0 || seedContacts.emails.length > 0;
   const contactPhones = [...seedContacts.phones];
   const contactEmails = [...seedContacts.emails];
-  let combinedText = seedSnippetText;
+  let websiteChecks = 0;
+  let combinedText = seedSourceText;
 
-  // The supplied agent profile is itself a primary evidence source.
+  const sourceIdentity = (source: SearchResult): { strong: boolean; phoneMatch: boolean; nameScore: number } => {
+    const text = `${source.title || ''} ${source.snippet || ''}`;
+    const nameScore = nameMatch(name, text);
+    const normalized = normalizeText(text);
+    const phoneMatch = knownPhones.some((phone) => {
+      const normalizedPhone = normalizePhone(phone);
+      return Boolean(normalizedPhone && normalized.includes(normalizedPhone.slice(-10)));
+    });
+    const locationMatch = !location || normalizeText(text).includes(normalizeText(location));
+    const strong = phoneMatch || nameScore >= 0.62 || (nameScore >= 0.48 && locationMatch);
+    return { strong, phoneMatch, nameScore };
+  };
+
+  // Fetch the supplied profile directly. This is the primary identity/contact source,
+  // but it is never counted as independent corroboration.
   try {
     const response = await fetchText(seedProfile);
     const html = await response.text();
-    const text = cleanHtml(html, 9000);
+    const text = cleanHtml(html, 10000);
     combinedText += ` ${text}`;
 
     const contacts = extractContacts(text);
     if (contacts.phones.length || contacts.emails.length) publicContact = true;
     contactPhones.push(...contacts.phones);
     contactEmails.push(...contacts.emails);
+    knownPhones.push(...contacts.phones);
 
     const outbound = extractHttpLinks(html, response.url);
     for (const url of outbound) {
       const host = hostOf(url);
       if (!host || host === seedHost) continue;
-
       if (isSocialUrl(url)) {
         socialUrls.add(url);
-        continue;
-      }
-
-      if (isDirectoryUrl(url) || isSearchEngineHost(url)) {
+      } else if (isDirectoryUrl(url) || isSearchEngineHost(url)) {
         directoryUrls.add(url);
-        continue;
-      }
-
-      if (isIndependentCandidateUrl(url)) {
+      } else if (isIndependentCandidateUrl(url)) {
         outboundWebsiteUrls.add(url);
       }
     }
 
     evidenceItems.push(
       evidence(response.url, 'directory',
-        'The supplied agent profile was fetched directly and used as the primary identity/contact source.',
-        text.slice(0, 280), 0.9)
+        'The supplied source profile was fetched directly and used as the primary identity/contact source.',
+        text.slice(0, 300), 0.95)
     );
   } catch {
     evidenceItems.push(
       evidence(seedProfile, 'directory',
-        'The supplied agent profile was used as the primary identity source; direct fetching was unavailable.',
-        undefined, 0.6)
+        'The supplied source profile was used as the primary identity source, but direct fetching was unavailable.',
+        undefined, 0.65)
     );
   }
 
-  for (const source of sources) {
-    const text = `${source.title} ${source.snippet || ''}`;
-    const host = hostOf(source.url);
+  for (const source of results) {
+    if (canonicalizeUrl(source.url) === seedProfile) continue;
+    const match = sourceIdentity(source);
+    if (!match.strong) continue;
 
-    if (isSocialUrl(source.url)) socialUrls.add(source.url);
-    else if (isDirectoryUrl(source.url)) directoryUrls.add(source.url);
-    else if (!isSearchEngineHost(source.url)) otherWebUrls.add(source.url);
+    const sourceText = `${source.title || ''} ${source.snippet || ''}`;
+    matchedIdentityUrls.add(source.url);
+    combinedText += ` ${sourceText}`;
 
-    if (nameMatch(name, text) >= 0.45) {
-      const contacts = extractContacts(text);
-      if (contacts.phones.length || contacts.emails.length) publicContact = true;
-      contactPhones.push(...contacts.phones);
-      contactEmails.push(...contacts.emails);
-      combinedText += ` ${text}`;
+    const contacts = extractContacts(sourceText);
+    if (contacts.phones.length || contacts.emails.length) publicContact = true;
+    contactPhones.push(...contacts.phones);
+    contactEmails.push(...contacts.emails);
+    knownPhones.push(...contacts.phones);
+
+    if (isSocialUrl(source.url)) {
+      socialUrls.add(source.url);
+    } else if (isDirectoryUrl(source.url)) {
+      directoryUrls.add(source.url);
+    } else if (!isSearchEngineHost(source.url)) {
+      otherWebUrls.add(source.url);
+    }
+
+    if (isIndependentCandidateUrl(source.url)) {
+      candidateWebsiteUrls.add(source.url);
     }
   }
 
-  // Search results that look like independent sites are candidates for direct verification.
-  for (const result of sources) {
-    if (!isIndependentCandidateUrl(result.url)) continue;
-    if (hostOf(result.url) === seedHost) continue;
-    if (nameMatch(name, `${result.title} ${result.snippet || ''}`) < 0.45) continue;
-    candidateWebsiteUrls.push(result.url);
-  }
+  // Re-scan outbound website links now that we have any additional phone identity signals.
+  for (const url of outboundWebsiteUrls) candidateWebsiteUrls.add(url);
 
-  for (const url of outboundWebsiteUrls) candidateWebsiteUrls.push(url);
-
-  const websiteTargets = [...new Set(candidateWebsiteUrls)]
-    .slice(0, 3);
+  const websiteTargets = [...candidateWebsiteUrls]
+    .filter((url) => hostOf(url) !== seedHost)
+    .slice(0, 4);
 
   for (const url of websiteTargets) {
+    websiteChecks += 1;
     try {
       const response = await fetchText(url);
       const html = await response.text();
-      const text = cleanHtml(html, 7000);
-      const match = nameMatch(name, text);
-      if (response.ok && match >= 0.55) {
+      const text = cleanHtml(html, 9000);
+      const nameScore = nameMatch(name, text);
+      const phoneMatch = knownPhones.some((phone) => {
+        const normalizedPhone = normalizePhone(phone);
+        const normalizedText = normalizeText(text);
+        return Boolean(normalizedPhone && normalizedText.includes(normalizedPhone.slice(-10)));
+      });
+      const locationMatch = !location || normalizeText(text).includes(normalizeText(location));
+      if (response.ok && (phoneMatch || nameScore >= 0.62 || (nameScore >= 0.48 && locationMatch))) {
         reachableIndependent = true;
         matchedWebsiteUrl = response.url;
         evidenceItems.push(
           evidence(response.url, 'website',
             'A reachable external website matches the agent/business identity.',
-            text.slice(0, 280), 0.95)
+            text.slice(0, 300), 0.97)
         );
         break;
       }
 
       evidenceItems.push(
         evidence(url, 'website',
-          'An external website candidate was checked but could not be confidently matched to this agent/business.',
-          text.slice(0, 220), 0.7)
+          'A possible external website was checked but did not produce a sufficiently strong identity match.',
+          text.slice(0, 240), 0.72)
       );
     } catch {
       evidenceItems.push(
@@ -509,30 +564,46 @@ async function verifyBusiness(candidate: CandidateRecord, plan: ResearchPlan, se
     }
   }
 
-  const socialHostSet = new Set([...socialUrls].map(hostOf).filter(Boolean));
-  const directoryHostSet = new Set([...directoryUrls].map(hostOf).filter(Boolean));
-  const otherWebHostSet = new Set(
-    [...otherWebUrls, ...outboundWebsiteUrls]
+  const socialHostSet = new Set([...socialUrls].map(hostOf).filter(Boolean).filter((host) => host !== seedHost));
+  const directoryHostSet = new Set([...directoryUrls].map(hostOf).filter(Boolean).filter((host) => host !== seedHost));
+  const otherWebHostSet = new Set([...otherWebUrls]
+    .map(hostOf)
+    .filter(Boolean)
+    .filter((host) => host !== seedHost)
+    .filter((host) => !isSearchEngineHost(`https://${host}`)));
+
+  const independentIdentityHosts = new Set(
+    [...matchedIdentityUrls]
       .map(hostOf)
-      .filter(Boolean)
-      .filter((host) => host !== seedHost)
-      .filter((host) => !isSearchEngineHost(`https://${host}`))
+      .filter((host) => host && host !== seedHost && !isSearchEngineHost(`https://${host}`))
   );
 
   const hasSocial = socialHostSet.size >= 1;
-  const hasOtherPublicSource = otherWebHostSet.size >= 1;
-  const hasSecondDirectory = [...directoryHostSet].some((host) => host !== seedHost);
-  const corroborated = hasOtherPublicSource || hasSecondDirectory || socialHostSet.size >= 2;
+  const hasStrongSocial = [...socialUrls].some((url) => {
+    const source = results.find((item) => canonicalizeUrl(item.url) === canonicalizeUrl(url));
+    return source ? sourceIdentity(source).strong : true;
+  });
+  const hasIndependentCorroboration = independentIdentityHosts.size >= 2
+    || (independentIdentityHosts.size >= 1 && hasStrongSocial && publicContact);
 
-  const noIndependentWebsite = !reachableIndependent && corroborated && publicContact;
+  // "No website" is treated as an evidence-backed negative finding, not as a
+  // universal proof of absence. We require several independent website-search
+  // angles, no credible matched site, and corroborated identity/contact data.
+  const noWebsiteSignal = !reachableIndependent
+    && successfulWebsiteQueries >= 3
+    && successfulCorroborationQueries >= 2
+    && hasIndependentCorroboration
+    && publicContact;
+
+  const independentSourceCount = independentIdentityHosts.size;
 
   if (hasSocial) {
     const firstSocial = [...socialUrls][0];
     if (firstSocial) {
       evidenceItems.push(
         evidence(firstSocial, 'social',
-          'A public social profile was found for the agent/business; social presence is not treated as an independent website.',
-          undefined, 0.8)
+          'A public social profile was found and identity-matched; social presence is not treated as an independent website.',
+          undefined, 0.88)
       );
     }
   }
@@ -540,74 +611,82 @@ async function verifyBusiness(candidate: CandidateRecord, plan: ResearchPlan, se
   if (publicContact) {
     evidenceItems.push(
       evidence(seedProfile, 'directory',
-        'Public contact information was found on the supplied agent profile or independent evidence.',
-        undefined, 0.8)
+        'Public contact information was recovered from the supplied source or identity-matched public sources.',
+        undefined, 0.9)
     );
   }
 
-  if (corroborated) {
-    const corroborationUrl = [...otherWebUrls][0] || [...directoryUrls].find((url) => hostOf(url) !== seedHost) || [...socialUrls][0];
+  if (hasIndependentCorroboration) {
+    const corroborationUrl = [...matchedIdentityUrls].find((url) => hostOf(url) !== seedHost);
     if (corroborationUrl) {
       evidenceItems.push(
         evidence(corroborationUrl, sourceKind(corroborationUrl),
-          'The agent identity is corroborated by a separate public source.',
-          undefined, 0.8)
+          `The agent identity is corroborated by ${independentSourceCount} independent public host(s).`,
+          undefined, 0.88)
       );
     }
   }
 
-  if (!reachableIndependent && websiteTargets.length === 0) {
-    evidenceItems.push(
-      evidence(seedProfile, 'directory',
-        'No matching independent website candidate was discovered during targeted name/phone/web checks.',
-        undefined, corroborated ? 0.75 : 0.55)
-    );
-  }
+  evidenceItems.push(
+    evidence(seedProfile, 'directory',
+      `Website absence sweep completed across ${successfulWebsiteQueries} successful search angle(s); ${websiteTargets.length} candidate website URL(s) were directly checked.`,
+      undefined,
+      noWebsiteSignal ? 0.84 : 0.65
+    )
+  );
 
   const score = Math.min(10, Number((
-    (noIndependentWebsite ? 4 : 0) +
-    (hasSocial ? 1.5 : 0) +
-    (publicContact ? 1.5 : 0) +
-    (corroborated ? 1.5 : 0) +
-    (otherWebHostSet.size >= 2 ? 0.5 : 0) +
+    (noWebsiteSignal ? 4 : 0) +
+    (hasSocial ? 1.2 : 0) +
+    (publicContact ? 1.6 : 0) +
+    (hasIndependentCorroboration ? 1.7 : 0) +
+    (independentSourceCount >= 2 ? 0.5 : 0) +
     Math.min(1, nameMatch(name, combinedText))
   ).toFixed(1)));
 
-  const confidence = noIndependentWebsite
-    ? Math.min(0.92,
-        0.55 +
-        (hasSocial ? 0.08 : 0) +
-        (corroborated ? 0.1 : 0) +
-        (publicContact ? 0.08 : 0) +
-        (websiteTargets.length === 0 ? 0.06 : 0))
-    : reachableIndependent
-      ? 0
-      : Math.min(0.7, 0.45 + (corroborated ? 0.08 : 0) + (publicContact ? 0.05 : 0));
+  const confidence = reachableIndependent
+    ? 0
+    : noWebsiteSignal
+      ? Math.min(0.96,
+          0.63 +
+          (hasSocial ? 0.06 : 0) +
+          (independentSourceCount >= 2 ? 0.1 : 0) +
+          (publicContact ? 0.09 : 0))
+      : Math.min(0.78,
+          0.42 +
+          (hasIndependentCorroboration ? 0.12 : 0) +
+          (publicContact ? 0.08 : 0) +
+          (websiteTargets.length === 0 ? 0.04 : 0));
 
   return {
     ...candidate,
-    sources,
+    sources: results,
     facts: {
       ...candidate.facts,
       socialUrls: [...socialUrls].join(','),
-      candidateWebsiteUrls: [...new Set(candidateWebsiteUrls)].join(','),
+      candidateWebsiteUrls: [...candidateWebsiteUrls].join(','),
       matchedWebsiteUrl,
       publicContact,
       phones: [...new Set(contactPhones)].join(', '),
       emails: [...new Set(contactEmails)].join(', '),
       socialOnly: hasSocial && !reachableIndependent,
-      noIndependentWebsite,
-      verifiedSourceCount: sources.length,
-      verifiedSourceHosts: socialHostSet.size + directoryHostSet.size + otherWebHostSet.size,
-      independentCorroboration: corroborated,
-      websiteChecks: websiteTargets.length
+      noIndependentWebsite: noWebsiteSignal,
+      verifiedSourceCount: results.length,
+      verifiedSourceHosts: independentIdentityHosts.size,
+      independentCorroboration: hasIndependentCorroboration,
+      independentSourceCount,
+      websiteChecks: websiteTargets.length,
+      websiteSearchAngles: successfulWebsiteQueries,
+      corroborationSearchAngles: successfulCorroborationQueries,
+      matchedIdentitySourceCount: matchedIdentityUrls.size
     },
     evidence: evidenceItems,
-    status: reachableIndependent ? 'rejected' : noIndependentWebsite ? 'verified' : 'uncertain',
+    status: reachableIndependent ? 'rejected' : noWebsiteSignal ? 'verified' : 'uncertain',
     confidence,
     score
   };
 }
+
 function compactCandidate(candidate: CandidateRecord): string {
   return JSON.stringify({
     id: candidate.id,
@@ -932,7 +1011,7 @@ export class OpportunityHunter {
       const seededResults = await discoverFromSeedUrls(
         plan.sourceUrls,
         Math.min(plan.candidateLimit, Math.max(plan.requestedCount * 3, 30)),
-        4
+        12
       );
       const seededCandidates = mergeCandidates(seededResults, plan.mode, plan.location);
       candidates = mergeCandidateLists(candidates, seededCandidates).slice(0, plan.candidateLimit);
@@ -945,7 +1024,7 @@ export class OpportunityHunter {
     let rounds = 0;
     let exhaustedReason = 'target reached';
 
-    const maxResearchRounds = plan.sourceUrls.length ? 8 : MAX_RESEARCH_ROUNDS;
+    const maxResearchRounds = plan.sourceUrls.length ? 12 : MAX_RESEARCH_ROUNDS;
     for (let round = 0; round < maxResearchRounds; round += 1) {
       rounds = round + 1;
       const sourcePoolStillActive = plan.sourceUrls.length > 0 &&
@@ -959,7 +1038,7 @@ export class OpportunityHunter {
         }
       }
 
-      const activeQueries = sourcePoolStillActive
+      const activeQueries = plan.sourceUrls.length
         ? []
         : queryQueue.filter((query) => !searchedQueries.has(query)).slice(0, round === 0 ? 8 : 5);
       for (const query of activeQueries) searchedQueries.add(query);
@@ -1003,6 +1082,12 @@ export class OpportunityHunter {
       const strongCount = candidates.filter((candidate) => isEligibleCandidate(candidate, plan.mode)).length;
       if (strongCount >= plan.requestedCount) {
         exhaustedReason = 'requested target reached';
+        break;
+      }
+
+      const sourceCandidatesPending = candidates.some((candidate) => candidate.status === 'discovered' || candidate.status === 'uncertain');
+      if (plan.sourceUrls.length && !sourceCandidatesPending) {
+        exhaustedReason = 'all candidates from the supplied source were investigated';
         break;
       }
 

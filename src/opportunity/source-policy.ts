@@ -9,7 +9,8 @@ const BUSINESS_INDEX_PATHS = [
   /\/categories\//i,
   /\/list(?:-food|ings?)?[/?]/i,
   /\/region\//i,
-  /\/archives?\//i
+  /\/archives?\//i,
+  /\/agents\/?$/i
 ];
 
 const JOB_LISTING_HOSTS = new Map<string, RegExp>([
@@ -24,7 +25,7 @@ const JOB_LISTING_HOSTS = new Map<string, RegExp>([
 const PROFILE_HOSTS = /(^|\.)(linkedin\.com|upwork\.com)$/i;
 const SOCIAL_HOSTS = /(^|\.)(instagram\.com|facebook\.com|linkedin\.com|tiktok\.com|x\.com)$/i;
 const SEARCH_INFRA_HOSTS = /(^|\.)(google\.com|google\.ng|googleusercontent\.com|maps\.google\.com|bing\.com|duckduckgo\.com|yahoo\.com)$/i;
-const DIRECTORY_HOSTS = /(^|\.)(businesslist\.com\.ng|finelib\.com|yellowpages|connectciti\.com|foursquare\.com|tripadvisor\.|yelp\.|directory\.org\.ng|nigeriabusinessweb\.com|geoleadsweb\.com)$/i;
+const DIRECTORY_HOSTS = /(^|\.)(businesslist\.com\.ng|finelib\.com|yellowpages|connectciti\.com|foursquare\.com|tripadvisor\.|yelp\.|directory\.org\.ng|nigeriabusinessweb\.com|geoleadsweb\.com|nigeriapropertycentre\.com)$/i;
 const EDITORIAL_HOSTS = /(^|\.)(wakaabuja\.com|abujaeats\.com\.ng|ranked\.ng|abujabusinessnews\.com|sabiabuja\.com|whatsoninabuja\.com)$/i;
 
 export function isSocialUrl(url: string): boolean {

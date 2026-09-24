@@ -1,5 +1,6 @@
 import type { SearchResult } from '../discovery/search.js';
 import { normalizeText, hostOf } from './entities.js';
+import { extractSeedUrls, inferLocationFromSourceUrl } from './seed-source.js';
 import { isBusinessIndexUrl, isEditorialUrl, isLikelyJobListing, isJobProfileUrl, isSearchNoise, looksLikeIndependentBusinessSite } from './source-policy.js';
 import type { HuntMode, ResearchPlan } from './types.js';
 
@@ -48,16 +49,20 @@ export function defaultPlan(request: string): ResearchPlan {
   const roles = mode === 'jobs' ? extractRoles(request) : [];
   const skills = mode === 'jobs' ? extractSkills(request) : [];
   const categories = mode === 'business_website_gap' ? extractCategories(request) : [];
+  const sourceUrls = extractSeedUrls(request);
+  const sourceLocation = sourceUrls.map(inferLocationFromSourceUrl).find(Boolean);
+  const finalLocation = location || sourceLocation;
   return {
     mode,
-    location,
+    location: finalLocation,
+    sourceUrls,
     roles,
     skills,
     categories,
     experienceLevel: extractExperienceLevel(request),
     workPreference: extractWorkPreference(request),
     excludeTerms: extractExcludeTerms(request),
-    queries: buildQueries({ mode, location, roles, skills, categories, workPreference: extractWorkPreference(request) }),
+    queries: buildQueries({ mode, location: finalLocation, roles, skills, categories, workPreference: extractWorkPreference(request) }),
     candidateLimit: mode === 'jobs' ? 40 : 30,
     verifyLimit: mode === 'jobs' ? 8 : 6,
     sourceDomains: mode === 'jobs' ? JOB_SOURCES : BUSINESS_SOURCE_HINTS,
@@ -123,7 +128,7 @@ function extractRoles(request: string): string[] {
 }
 
 function extractCategories(request: string): string[] {
-  const match = request.match(/\b(?:find|discover|list|bring|get)\s+(?:\d+\s+|(?:like|about|around)\s+[a-z-]+\s+)?(?:(.+?)\s+)?(real estate agents|estate agents|agents|brokers|businesses|companies|shops|stores|restaurants|salons|hotels|clinics|agencies)\s+(?:in|around|near|from|on)\b/i);
+  const match = request.match(/\b(?:find|discover|list|bring|get|check)\s+(?:\d+\s+|(?:like|about|around)\s+[a-z-]+\s+)?(?:(.+?)\s+)?(real estate agents|estate agents|agents|brokers|businesses|companies|shops|stores|restaurants|salons|hotels|clinics|agencies)\b/i);
   if (!match?.[2]) return [];
   const modifier = match[1]?.trim();
   return [modifier ? `${modifier} ${match[2]}` : match[2]];

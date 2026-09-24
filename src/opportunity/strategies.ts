@@ -36,7 +36,7 @@ const NOISE_PATTERNS = [
 export function detectMode(request: string): HuntMode {
   const text = normalizeText(request);
   if (/\b(job|jobs|job hunting|vacanc|career|internship|graduate trainee|recruit|hiring|role|position|employment)\b/i.test(text)) return 'jobs';
-  if (/\b(business|businesses|company|companies|salon|salons|restaurant|restaurants|hotel|hotels|shop|shops|store|stores|clinic|clinics|agency|agencies|without website|no website|website gap)\b/i.test(text)) {
+  if (/\b(business|businesses|company|companies|salon|salons|restaurant|restaurants|hotel|hotels|shop|shops|store|stores|clinic|clinics|agency|agencies|agent|agents|broker|brokers|real estate|estate agent|without website|no website|website gap|own website)\b/i.test(text)) {
     return 'business_website_gap';
   }
   return 'general';
@@ -68,9 +68,21 @@ export function defaultPlan(request: string): ResearchPlan {
 }
 
 function extractRequestedCount(request: string): number {
-  const match = request.match(/\b(?:find|get|return|give me|top)\s+(\d{1,3})\b/i);
-  const count = Number(match?.[1] ?? 10);
-  return Number.isFinite(count) ? Math.max(1, Math.min(100, Math.floor(count))) : 10;
+  const digitMatch = request.match(/\b(?:find|get|return|give me|top|bring)\s+(?:like\s+|about\s+|around\s+)?(\d{1,3})\b/i);
+  if (digitMatch?.[1]) {
+    const count = Number(digitMatch[1]);
+    return Number.isFinite(count) ? Math.max(1, Math.min(100, Math.floor(count))) : 10;
+  }
+
+  const wordMatch = request.match(/\b(?:find|get|return|give me|top|bring)\s+(?:like\s+|about\s+|around\s+)?([a-z-]+)(?:\s+of\s+them|\s+agents|\s+businesses|\s+companies)?\b/i);
+  const words: Record<string, number> = {
+    one: 1, two: 2, three: 3, four: 4, five: 5, six: 6, seven: 7, eight: 8, nine: 9, ten: 10,
+    eleven: 11, twelve: 12, thirteen: 13, fourteen: 14, fifteen: 15, sixteen: 16, seventeen: 17,
+    eighteen: 18, nineteen: 19, twenty: 20, thirty: 30, forty: 40, fifty: 50, sixty: 60, seventy: 70,
+    eighty: 80, ninety: 90, hundred: 100
+  };
+  const count = wordMatch?.[1] ? words[wordMatch[1].toLowerCase()] : undefined;
+  return Number.isFinite(count) ? Math.max(1, Math.min(100, count!)) : 10;
 }
 
 function extractSkills(request: string): string[] {
@@ -111,7 +123,7 @@ function extractRoles(request: string): string[] {
 }
 
 function extractCategories(request: string): string[] {
-  const match = request.match(/\b(?:find|discover|list)\s+(?:\d+\s+)?(?:(.+?)\s+)?(businesses|companies|shops|stores|restaurants|salons|hotels|clinics|agencies)\s+(?:in|around|near)\b/i);
+  const match = request.match(/\b(?:find|discover|list|bring|get)\s+(?:\d+\s+|(?:like|about|around)\s+[a-z-]+\s+)?(?:(.+?)\s+)?(real estate agents|estate agents|agents|brokers|businesses|companies|shops|stores|restaurants|salons|hotels|clinics|agencies)\s+(?:in|around|near|from|on)\b/i);
   if (!match?.[2]) return [];
   const modifier = match[1]?.trim();
   return [modifier ? `${modifier} ${match[2]}` : match[2]];
@@ -164,7 +176,7 @@ export function candidateFromResult(result: SearchResult, mode: HuntMode, locati
   if (!cleanTitle) return null;
   if (mode === 'business_website_gap' && (NOISE_PATTERNS.some((pattern) => pattern.test(cleanTitle)) || isSearchNoise(cleanTitle, result.snippet))) return null;
   if (mode === 'business_website_gap' && isEditorialUrl(result.url)) return null;
-  if (mode === 'business_website_gap' && looksLikeIndependentBusinessSite(result.url)) return null;
+  if (mode === 'business_website_gap' && result.source !== 'seed' && looksLikeIndependentBusinessSite(result.url)) return null;
   if (mode === 'business_website_gap' && isBusinessIndexUrl(result.url) && !/\/company\//i.test(result.url)) return null;
   if (mode === 'jobs' && !isLikelyJobListing(result.url, cleanTitle, result.snippet)) return null;
 

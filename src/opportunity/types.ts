@@ -9,6 +9,7 @@ export type CandidateRecord = {
   name: string;
   title?: string;
   location?: string;
+  sourceUrls: string[];
   sourceUrl: string;
   sources: SearchResult[];
   facts: Record<string, string | number | boolean | undefined>;

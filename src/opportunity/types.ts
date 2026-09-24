@@ -9,7 +9,6 @@ export type CandidateRecord = {
   name: string;
   title?: string;
   location?: string;
-  sourceUrls: string[];
   sourceUrl: string;
   sources: SearchResult[];
   facts: Record<string, string | number | boolean | undefined>;
@@ -22,6 +21,7 @@ export type CandidateRecord = {
 export type ResearchPlan = {
   mode: HuntMode;
   location?: string;
+  sourceUrls: string[];
   roles: string[];
   skills: string[];
   categories: string[];

@@ -558,7 +558,9 @@ function sanitizePlan(request: string, args: Record<string, unknown>): ResearchP
     workPreference,
     excludeTerms,
     queries: buildQueries({ mode, location: finalLocation, roles, skills, categories, workPreference }).slice(0, 6),
-    candidateLimit: Number.isFinite(candidateLimit) ? Math.max(10, Math.min(60, Math.floor(candidateLimit))) : fallback.candidateLimit,
+    candidateLimit: Number.isFinite(candidateLimit)
+      ? Math.max(sourceUrls.length ? Math.max(30, requestedCount * 3) : 10, Math.min(60, Math.floor(candidateLimit)))
+      : (sourceUrls.length ? Math.max(30, requestedCount * 3) : fallback.candidateLimit),
     verifyLimit: Number.isFinite(verifyLimit) ? Math.max(4, Math.min(safeVerifyLimit, Math.floor(verifyLimit))) : fallback.verifyLimit,
     sourceDomains: fallback.sourceDomains,
     freshnessDays: Number.isFinite(freshnessDays) ? Math.max(1, Math.min(3650, Math.floor(freshnessDays))) : fallback.freshnessDays,
@@ -680,10 +682,13 @@ function renderDeterministicResults(
     .filter((candidate) => isEligibleCandidate(candidate, mode))
     .sort((a, b) => (b.score * b.confidence) - (a.score * a.confidence))
     .slice(0, Math.min(requestedCount, 20));
+  const toCheckLimit = candidates.some((candidate) => candidate.sources.some((source) => source.source === 'seed'))
+    ? Math.max(requestedCount, 20)
+    : 8;
   const toCheck = candidates
     .filter((candidate) => candidate.status === 'uncertain' && candidate.confidence >= 0.35)
     .sort((a, b) => (b.score * b.confidence) - (a.score * a.confidence))
-    .slice(0, 8);
+    .slice(0, toCheckLimit);
 
   const lines = [
     '## Research result',
@@ -802,7 +807,8 @@ export class OpportunityHunter {
     let rounds = 0;
     let exhaustedReason = 'target reached';
 
-    for (let round = 0; round < MAX_RESEARCH_ROUNDS; round += 1) {
+    const maxResearchRounds = plan.sourceUrls.length ? 8 : MAX_RESEARCH_ROUNDS;
+    for (let round = 0; round < maxResearchRounds; round += 1) {
       rounds = round + 1;
       const sourcePoolStillActive = plan.sourceUrls.length > 0 &&
         candidates.some((candidate) => candidate.status === 'discovered' || candidate.status === 'uncertain');
@@ -834,7 +840,7 @@ export class OpportunityHunter {
         break;
       }
 
-      const verificationBatchLimit = plan.mode === 'jobs' ? 5 : 4;
+      const verificationBatchLimit = plan.mode === 'jobs' ? 5 : (plan.sourceUrls.length ? 5 : 4);
       const toVerify = candidates
         .filter((candidate) => {
           if (candidate.status === 'discovered') return true;
@@ -865,7 +871,8 @@ export class OpportunityHunter {
       const gainedCandidates = candidates.length - beforeCount;
       const afterSourceCount = candidates.reduce((total, candidate) => total + candidate.sources.length, 0);
       const gainedEvidence = afterSourceCount > beforeSourceCount;
-      if (gainedCandidates === 0 && !gainedEvidence) noProgressRounds += 1;
+      const processedCandidates = toVerify.length > 0;
+      if (gainedCandidates === 0 && !gainedEvidence && !(sourcePoolStillActive && processedCandidates)) noProgressRounds += 1;
       else noProgressRounds = 0;
 
       if (!refineUsed && strongCount < Math.min(plan.requestedCount, 3) && getRequestCount() < 60) {
@@ -896,7 +903,7 @@ export class OpportunityHunter {
       }
     }
 
-    if (rounds >= MAX_RESEARCH_ROUNDS && candidates.filter((candidate) => isEligibleCandidate(candidate, plan.mode)).length < plan.requestedCount) {
+    if (rounds >= maxResearchRounds && candidates.filter((candidate) => isEligibleCandidate(candidate, plan.mode)).length < plan.requestedCount) {
       exhaustedReason = 'research round limit reached';
     }
 
@@ -927,11 +934,17 @@ export class OpportunityHunter {
       return renderDeterministicResults(candidates, plan.mode, plan.requestedCount, rounds, exhaustedReason === 'target reached' ? 'no viable candidates discovered' : exhaustedReason);
     }
 
-    const toCheck = candidates.filter((candidate) => candidate.status === 'uncertain' && candidate.confidence >= 0.35).slice(0, 8);
+    const toCheck = candidates
+      .filter((candidate) => candidate.status === 'uncertain' && candidate.confidence >= 0.35)
+      .slice(0, plan.sourceUrls.length ? Math.max(plan.requestedCount, 20) : 8);
     const envelopeCandidates = [...eligibleCandidates.slice(0, plan.requestedCount), ...toCheck].slice(0, 16);
     if (!envelopeCandidates.length) {
       return renderDeterministicResults(candidates, plan.mode, plan.requestedCount, rounds, exhaustedReason);
     }
+    if (plan.sourceUrls.length) {
+      return renderDeterministicResults(candidates, plan.mode, plan.requestedCount, rounds, exhaustedReason);
+    }
+
     const evidenceEnvelope = envelopeCandidates.map(compactCandidate).join('\n');
     const finalResponse = await brainCompleteWithRetry(this.brain, {
       system: `You are the final synthesis brain. Use only the supplied evidence envelope. Never invent facts. The research engine has already enforced objective-specific verification. Return up to ${plan.requestedCount} verified opportunities when available. If fewer than requested were verified, explicitly keep the remaining credible near-misses in a separate 'To check' section; never promote them to verified. Include direct URLs and public contacts only when present in evidence.\n\nEvidence envelope:\n${evidenceEnvelope}` ,

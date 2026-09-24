@@ -3,7 +3,7 @@ import type { BrainProvider, Evidence, Opportunity } from '../core/types.js';
 import type { SearchProvider, SearchResult } from '../discovery/search.js';
 import { cleanHtml, fetchText, getRequestCount } from '../runtime/http.js';
 import { OpportunityStore } from '../runtime/store.js';
-import { canonicalizeUrl, hostOf, normalizeText, sameEntity } from './entities.js';
+import { canonicalizeUrl, hostOf, normalizePhone, normalizeText, sameEntity } from './entities.js';
 import { isDirectoryUrl, isEditorialUrl, isJobListingUrl, isLikelyJobListing, looksLikeIndependentBusinessSite, isSocialUrl } from './source-policy.js';
 import { candidateFromResult, defaultPlan, buildQueries } from './strategies.js';
 import { discoverFromSeedUrls, extractSeedUrls, inferLocationFromSourceUrl } from './seed-source.js';
@@ -568,7 +568,6 @@ async function verifyBusiness(candidate: CandidateRecord, plan: ResearchPlan, se
   // universal proof of absence. We require several independent website-search
   // angles, no credible matched site, and corroborated identity/contact data.
   const noWebsiteSignal = !reachableIndependent
-    && websiteChecks === 0
     && websiteQueries.length >= 4
     && hasIndependentCorroboration
     && publicContact;

@@ -11,7 +11,7 @@ import type { CandidateRecord, HuntMode, ResearchPlan } from './types.js';
 
 const MAX_DISCOVERY_RESULTS_PER_QUERY = 8;
 const SOCIAL_HOSTS = new Set(['instagram.com', 'facebook.com', 'linkedin.com', 'tiktok.com', 'x.com']);
-const DIRECTORY_HINTS = /directory|yellowpages|businesslist|foursquare|tripadvisor|yelp|mapquest|geoleads/i;
+const DIRECTORY_HINTS = /directory|yellowpages|businesslist|foursquare|tripadvisor|yelp|mapquest|geoleads|nigeriapropertycentre/i;
 
 function evidence(url: string, sourceType: Evidence['source']['sourceType'], claim: string, excerpt?: string, confidence?: number): Evidence {
   return {
@@ -119,6 +119,30 @@ function sourceKind(url: string): Evidence['source']['sourceType'] {
 
 function looksLikeIndependentWebsite(url: string): boolean {
   return looksLikeIndependentBusinessSite(url);
+}
+
+function extractHttpLinks(html: string, baseUrl: string): string[] {
+  const urls: string[] = [];
+  for (const match of html.matchAll(/<a[^>]+href=["']([^"']+)["'][^>]*>/gi)) {
+    const href = match[1];
+    if (!href) continue;
+    try {
+      const url = new URL(href, baseUrl);
+      if (!/^https?:$/i.test(url.protocol)) continue;
+      urls.push(canonicalizeUrl(url.toString()));
+    } catch {
+      // Ignore malformed links.
+    }
+  }
+  return [...new Set(urls)];
+}
+
+function isSearchEngineHost(url: string): boolean {
+  return /(^|\.)google\.|(^|\.)bing\.|(^|\.)duckduckgo\.|(^|\.)yahoo\./i.test(hostOf(url));
+}
+
+function isIndependentCandidateUrl(url: string): boolean {
+  return looksLikeIndependentWebsite(url) && !isSearchEngineHost(url);
 }
 
 function nameMatch(candidateName: string, pageText: string): number {
@@ -347,26 +371,91 @@ async function verifyJob(candidate: CandidateRecord, plan: ResearchPlan, search:
 async function verifyBusiness(candidate: CandidateRecord, plan: ResearchPlan, search: SearchProvider): Promise<CandidateRecord> {
   const location = plan.location || '';
   const name = candidate.name;
+  const seedProfile = candidate.sourceUrl;
+  const seedHost = hostOf(seedProfile);
+
+  const seedSnippetText = candidate.sources
+    .filter((source) => source.source === 'seed' || hostOf(source.url) === seedHost)
+    .map((source) => `${source.title} ${source.snippet || ''}`)
+    .join(' ');
+  const seedContacts = extractContacts(seedSnippetText);
+  const seedPhone = seedContacts.phones[0];
+
   const queries = [
-    `"${name}" "${location}" website Instagram Facebook phone contact`
+    `"${name}" "${location}" website`,
+    `"${name}" "${location}" Instagram OR Facebook`,
+    seedPhone ? `"${name}" "${seedPhone}"` : `"${name}" "${location}" phone address`
   ];
   const results = await parallelSearch(search, queries, 8);
   const sources = uniqueResults([...candidate.sources, ...results]);
   const evidenceItems = [...candidate.evidence];
-  const socialUrls: string[] = [];
-  const listingUrls: string[] = [];
+
+  const socialUrls = new Set<string>();
+  const directoryUrls = new Set<string>();
+  const otherWebUrls = new Set<string>();
+  const outboundWebsiteUrls = new Set<string>();
+  const candidateWebsiteUrls: string[] = [];
+
   let reachableIndependent = false;
-  let independentCandidateUrls: string[] = [];
-  let publicContact = false;
-  let contactPhones: string[] = [];
-  let contactEmails: string[] = [];
   let matchedWebsiteUrl: string | undefined;
-  let combinedText = '';
+  let publicContact = seedContacts.phones.length > 0 || seedContacts.emails.length > 0;
+  const contactPhones = [...seedContacts.phones];
+  const contactEmails = [...seedContacts.emails];
+  let combinedText = seedSnippetText;
+
+  // The supplied agent profile is itself a primary evidence source.
+  try {
+    const response = await fetchText(seedProfile);
+    const html = await response.text();
+    const text = cleanHtml(html, 9000);
+    combinedText += ` ${text}`;
+
+    const contacts = extractContacts(text);
+    if (contacts.phones.length || contacts.emails.length) publicContact = true;
+    contactPhones.push(...contacts.phones);
+    contactEmails.push(...contacts.emails);
+
+    const outbound = extractHttpLinks(html, response.url);
+    for (const url of outbound) {
+      const host = hostOf(url);
+      if (!host || host === seedHost) continue;
+
+      if (isSocialUrl(url)) {
+        socialUrls.add(url);
+        continue;
+      }
+
+      if (isDirectoryUrl(url) || isSearchEngineHost(url)) {
+        directoryUrls.add(url);
+        continue;
+      }
+
+      if (isIndependentCandidateUrl(url)) {
+        outboundWebsiteUrls.add(url);
+      }
+    }
+
+    evidenceItems.push(
+      evidence(response.url, 'directory',
+        'The supplied agent profile was fetched directly and used as the primary identity/contact source.',
+        text.slice(0, 280), 0.9)
+    );
+  } catch {
+    evidenceItems.push(
+      evidence(seedProfile, 'directory',
+        'The supplied agent profile was used as the primary identity source; direct fetching was unavailable.',
+        undefined, 0.6)
+    );
+  }
 
   for (const source of sources) {
     const text = `${source.title} ${source.snippet || ''}`;
-    if (isSocialUrl(source.url)) socialUrls.push(source.url);
-    if (isDirectoryUrl(source.url)) listingUrls.push(source.url);
+    const host = hostOf(source.url);
+
+    if (isSocialUrl(source.url)) socialUrls.add(source.url);
+    else if (isDirectoryUrl(source.url)) directoryUrls.add(source.url);
+    else if (!isSearchEngineHost(source.url)) otherWebUrls.add(source.url);
+
     if (nameMatch(name, text) >= 0.45) {
       const contacts = extractContacts(text);
       if (contacts.phones.length || contacts.emails.length) publicContact = true;
@@ -376,96 +465,143 @@ async function verifyBusiness(candidate: CandidateRecord, plan: ResearchPlan, se
     }
   }
 
-  const websiteFetchTargets = sources
-    .filter((result) => !/top\s+\d+|best\s+\d+|without websites|businesses without websites|directory|category|list of|ranked/i.test(result.title || ''))
-    .filter((result) => looksLikeIndependentWebsite(result.url))
-    .sort((a, b) => nameMatch(name, `${b.title} ${b.snippet || ''}`) - nameMatch(name, `${a.title} ${a.snippet || ''}`))
-    .slice(0, 1);
-
-  const verificationTargets = websiteFetchTargets.slice(0, 1);
-  independentCandidateUrls = websiteFetchTargets.map((result) => result.url);
-
-  const fetched = new Set<string>();
-  for (const result of verificationTargets) {
-    if (fetched.has(result.url)) continue;
-    fetched.add(result.url);
-    const kind = sourceKind(result.url);
-
-    try {
-      const response = await fetchText(result.url);
-      const html = await response.text();
-      const text = cleanHtml(html, kind === 'website' ? 6000 : 5000);
-      if (kind === 'directory' || kind === 'social' || nameMatch(name, text) >= 0.35) {
-        combinedText += ` ${text}`;
-        const contacts = extractContacts(text);
-        if (contacts.phones.length || contacts.emails.length) publicContact = true;
-        contactPhones.push(...contacts.phones);
-        contactEmails.push(...contacts.emails);
-
-        if (kind === 'website' && response.ok && nameMatch(name, text) >= 0.55) {
-          reachableIndependent = true;
-          matchedWebsiteUrl = response.url;
-          evidenceItems.push(evidence(response.url, 'website', 'A reachable page matches the candidate business name strongly enough to count as an independent-site signal.', text.slice(0, 280), 0.9));
-        } else if (kind === 'directory' && nameMatch(name, text) >= 0.3) {
-          evidenceItems.push(evidence(response.url, 'directory', 'A public business directory page was reachable and matched the candidate identity.', text.slice(0, 280), 0.8));
-        }
-      }
-    } catch {
-      // Unreachable/blocked pages are not treated as proof of absence.
-    }
-
-    if (matchedWebsiteUrl) break;
+  // Search results that look like independent sites are candidates for direct verification.
+  for (const result of sources) {
+    if (!isIndependentCandidateUrl(result.url)) continue;
+    if (hostOf(result.url) === seedHost) continue;
+    if (nameMatch(name, `${result.title} ${result.snippet || ''}`) < 0.45) continue;
+    candidateWebsiteUrls.push(result.url);
   }
 
-  const socialHostSet = new Set(socialUrls.map((url) => hostOf(url)).filter(Boolean));
-  const listingHostSet = new Set(listingUrls.map((url) => hostOf(url)).filter(Boolean));
-  const strongSocial = socialHostSet.size >= 1;
-  const strongListing = listingHostSet.size >= 1;
-  const multipleListingHosts = listingHostSet.size >= 2;
-  const twoSocialsWithContact = socialHostSet.size >= 2 && publicContact;
-  const noIndependentWebsite = !reachableIndependent && (
-    (strongSocial && strongListing) ||
-    multipleListingHosts ||
-    twoSocialsWithContact
+  for (const url of outboundWebsiteUrls) candidateWebsiteUrls.push(url);
+
+  const websiteTargets = [...new Set(candidateWebsiteUrls)]
+    .slice(0, 3);
+
+  for (const url of websiteTargets) {
+    try {
+      const response = await fetchText(url);
+      const html = await response.text();
+      const text = cleanHtml(html, 7000);
+      const match = nameMatch(name, text);
+      if (response.ok && match >= 0.55) {
+        reachableIndependent = true;
+        matchedWebsiteUrl = response.url;
+        evidenceItems.push(
+          evidence(response.url, 'website',
+            'A reachable external website matches the agent/business identity.',
+            text.slice(0, 280), 0.95)
+        );
+        break;
+      }
+
+      evidenceItems.push(
+        evidence(url, 'website',
+          'An external website candidate was checked but could not be confidently matched to this agent/business.',
+          text.slice(0, 220), 0.7)
+      );
+    } catch {
+      evidenceItems.push(
+        evidence(url, 'website',
+          'A possible external website was discovered but could not be reached during verification.',
+          undefined, 0.55)
+      );
+    }
+  }
+
+  const socialHostSet = new Set([...socialUrls].map(hostOf).filter(Boolean));
+  const directoryHostSet = new Set([...directoryUrls].map(hostOf).filter(Boolean));
+  const otherWebHostSet = new Set(
+    [...otherWebUrls, ...outboundWebsiteUrls]
+      .map(hostOf)
+      .filter(Boolean)
+      .filter((host) => host !== seedHost)
+      .filter((host) => !isSearchEngineHost(`https://${host}`))
   );
 
-  if (strongSocial) evidenceItems.push(evidence(socialUrls[0]!, 'social', 'Public social presence discovered while no matching independent site was verified.', undefined, 0.75));
-  if (publicContact) evidenceItems.push(evidence(candidate.sourceUrl, 'directory', 'Public contact information was found during local verification.', undefined, 0.75));
-  if (strongListing) evidenceItems.push(evidence(listingUrls[0]!, 'search', 'Candidate is corroborated by a public directory or editorial source.', undefined, 0.8));
+  const hasSocial = socialHostSet.size >= 1;
+  const hasOtherPublicSource = otherWebHostSet.size >= 1;
+  const hasSecondDirectory = [...directoryHostSet].some((host) => host !== seedHost);
+  const corroborated = hasOtherPublicSource || hasSecondDirectory || socialHostSet.size >= 2;
+
+  const noIndependentWebsite = !reachableIndependent && corroborated && publicContact;
+
+  if (hasSocial) {
+    const firstSocial = [...socialUrls][0];
+    evidenceItems.push(
+      evidence(firstSocial, 'social',
+        'A public social profile was found for the agent/business; social presence is not treated as an independent website.',
+        undefined, 0.8)
+    );
+  }
+
+  if (publicContact) {
+    evidenceItems.push(
+      evidence(seedProfile, 'directory',
+        'Public contact information was found on the supplied agent profile or independent evidence.',
+        undefined, 0.8)
+    );
+  }
+
+  if (corroborated) {
+    const corroborationUrl = [...otherWebUrls][0] || [...directoryUrls].find((url) => hostOf(url) !== seedHost) || [...socialUrls][0];
+    if (corroborationUrl) {
+      evidenceItems.push(
+        evidence(corroborationUrl, sourceKind(corroborationUrl),
+          'The agent identity is corroborated by a separate public source.',
+          undefined, 0.8)
+      );
+    }
+  }
+
+  if (!reachableIndependent && websiteTargets.length === 0) {
+    evidenceItems.push(
+      evidence(seedProfile, 'directory',
+        'No matching independent website candidate was discovered during targeted name/phone/web checks.',
+        undefined, corroborated ? 0.75 : 0.55)
+    );
+  }
 
   const score = Math.min(10, Number((
     (noIndependentWebsite ? 4 : 0) +
-    (strongSocial ? 2 : 0) +
+    (hasSocial ? 1.5 : 0) +
     (publicContact ? 1.5 : 0) +
-    (strongListing ? 1.5 : 0) +
-    (multipleListingHosts ? 0.5 : 0) +
-    Math.min(0.5, nameMatch(name, combinedText))
+    (corroborated ? 1.5 : 0) +
+    (otherWebHostSet.size >= 2 ? 0.5 : 0) +
+    Math.min(1, nameMatch(name, combinedText))
   ).toFixed(1)));
 
   const confidence = noIndependentWebsite
-    ? Math.min(0.9, 0.55 + (strongSocial ? 0.1 : 0) + (strongListing ? 0.1 : 0) + (multipleListingHosts ? 0.08 : 0) + (publicContact ? 0.07 : 0))
+    ? Math.min(0.92,
+        0.55 +
+        (hasSocial ? 0.08 : 0) +
+        (corroborated ? 0.1 : 0) +
+        (publicContact ? 0.08 : 0) +
+        (websiteTargets.length === 0 ? 0.06 : 0))
     : reachableIndependent
       ? 0
-      : Math.min(0.7, 0.45 + (strongSocial ? 0.08 : 0) + (strongListing ? 0.08 : 0) + (publicContact ? 0.05 : 0));
+      : Math.min(0.7, 0.45 + (corroborated ? 0.08 : 0) + (publicContact ? 0.05 : 0));
 
   return {
     ...candidate,
     sources,
     facts: {
       ...candidate.facts,
-      socialUrls: socialUrls.join(','),
-      candidateWebsiteUrls: independentCandidateUrls.join(','),
+      socialUrls: [...socialUrls].join(','),
+      candidateWebsiteUrls: [...new Set(candidateWebsiteUrls)].join(','),
       matchedWebsiteUrl,
       publicContact,
       phones: [...new Set(contactPhones)].join(', '),
       emails: [...new Set(contactEmails)].join(', '),
-      socialOnly: strongSocial && !reachableIndependent,
+      socialOnly: hasSocial && !reachableIndependent,
       noIndependentWebsite,
       verifiedSourceCount: sources.length,
-      verifiedSourceHosts: socialHostSet.size + listingHostSet.size
+      verifiedSourceHosts: socialHostSet.size + directoryHostSet.size + otherWebHostSet.size,
+      independentCorroboration: corroborated,
+      websiteChecks: websiteTargets.length
     },
     evidence: evidenceItems,
-    status: noIndependentWebsite ? 'verified' : reachableIndependent ? 'rejected' : 'uncertain',
+    status: reachableIndependent ? 'rejected' : noIndependentWebsite ? 'verified' : 'uncertain',
     confidence,
     score
   };

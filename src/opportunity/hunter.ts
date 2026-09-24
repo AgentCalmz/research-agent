@@ -64,7 +64,12 @@ function mergeCandidates(results: SearchResult[], mode: HuntMode, location?: str
     output.push({
       ...candidate,
       id: randomUUID(),
-      evidence: [evidence(result.url, result.source === 'duckduckgo' || result.source === 'searxng' ? 'search' : 'other', 'Candidate discovered from public web search.', result.snippet)],
+      evidence: [evidence(
+        result.url,
+        result.source === 'duckduckgo' || result.source === 'searxng' ? 'search' : 'other',
+        result.source === 'seed' ? 'Candidate enumerated from the user-supplied source page.' : 'Candidate discovered from public web search.',
+        result.snippet
+      )],
       status: 'discovered',
       confidence: 0,
       score: 0
@@ -799,13 +804,20 @@ export class OpportunityHunter {
 
     for (let round = 0; round < MAX_RESEARCH_ROUNDS; round += 1) {
       rounds = round + 1;
-      const remainingQueries = queryQueue.filter((query) => !searchedQueries.has(query)).slice(0, round === 0 ? 8 : 5);
-      if (!remainingQueries.length) {
-        const next = fallbackResearchQueries(plan, round);
-        for (const query of next) if (!searchedQueries.has(query)) queryQueue.push(query);
+      const sourcePoolStillActive = plan.sourceUrls.length > 0 &&
+        candidates.some((candidate) => candidate.status === 'discovered' || candidate.status === 'uncertain');
+
+      if (!sourcePoolStillActive) {
+        const remainingQueries = queryQueue.filter((query) => !searchedQueries.has(query)).slice(0, round === 0 ? 8 : 5);
+        if (!remainingQueries.length) {
+          const next = fallbackResearchQueries(plan, round);
+          for (const query of next) if (!searchedQueries.has(query)) queryQueue.push(query);
+        }
       }
 
-      const activeQueries = queryQueue.filter((query) => !searchedQueries.has(query)).slice(0, round === 0 ? 8 : 5);
+      const activeQueries = sourcePoolStillActive
+        ? []
+        : queryQueue.filter((query) => !searchedQueries.has(query)).slice(0, round === 0 ? 8 : 5);
       for (const query of activeQueries) searchedQueries.add(query);
 
       const beforeCount = candidates.length;

@@ -528,11 +528,13 @@ async function verifyBusiness(candidate: CandidateRecord, plan: ResearchPlan, se
 
   if (hasSocial) {
     const firstSocial = [...socialUrls][0];
-    evidenceItems.push(
-      evidence(firstSocial, 'social',
-        'A public social profile was found for the agent/business; social presence is not treated as an independent website.',
-        undefined, 0.8)
-    );
+    if (firstSocial) {
+      evidenceItems.push(
+        evidence(firstSocial, 'social',
+          'A public social profile was found for the agent/business; social presence is not treated as an independent website.',
+          undefined, 0.8)
+      );
+    }
   }
 
   if (publicContact) {

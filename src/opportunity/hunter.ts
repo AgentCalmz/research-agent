@@ -987,7 +987,7 @@ export class OpportunityHunter {
       const seededResults = await discoverFromSeedUrls(
         plan.sourceUrls,
         Math.min(plan.candidateLimit, Math.max(plan.requestedCount * 3, 30)),
-        4
+        12
       );
       const seededCandidates = mergeCandidates(seededResults, plan.mode, plan.location);
       candidates = mergeCandidateLists(candidates, seededCandidates).slice(0, plan.candidateLimit);
@@ -1000,7 +1000,7 @@ export class OpportunityHunter {
     let rounds = 0;
     let exhaustedReason = 'target reached';
 
-    const maxResearchRounds = plan.sourceUrls.length ? 8 : MAX_RESEARCH_ROUNDS;
+    const maxResearchRounds = plan.sourceUrls.length ? 12 : MAX_RESEARCH_ROUNDS;
     for (let round = 0; round < maxResearchRounds; round += 1) {
       rounds = round + 1;
       const sourcePoolStillActive = plan.sourceUrls.length > 0 &&
@@ -1014,7 +1014,7 @@ export class OpportunityHunter {
         }
       }
 
-      const activeQueries = sourcePoolStillActive
+      const activeQueries = plan.sourceUrls.length
         ? []
         : queryQueue.filter((query) => !searchedQueries.has(query)).slice(0, round === 0 ? 8 : 5);
       for (const query of activeQueries) searchedQueries.add(query);
@@ -1058,6 +1058,12 @@ export class OpportunityHunter {
       const strongCount = candidates.filter((candidate) => isEligibleCandidate(candidate, plan.mode)).length;
       if (strongCount >= plan.requestedCount) {
         exhaustedReason = 'requested target reached';
+        break;
+      }
+
+      const sourceCandidatesPending = candidates.some((candidate) => candidate.status === 'discovered' || candidate.status === 'uncertain');
+      if (plan.sourceUrls.length && !sourceCandidatesPending) {
+        exhaustedReason = 'all candidates from the supplied source were investigated';
         break;
       }
 
